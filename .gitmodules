@@ -1,0 +1,3 @@
+[submodule "upstream/superset"]
+	path = upstream/superset
+	url = git@github.com:oonid/superset.git
