@@ -1,5 +1,7 @@
 # Superset Linux Installer Build
 
+[**Superset**](https://github.com/superset-sh/superset) is the code editor for AI agents. It orchestrates swarms of CLI-based coding agents (like Claude Code, Codex, and Cursor) in parallel, completely isolating them in their own Git worktrees to prevent interference. 
+
 The upstream Superset application currently only natively targets macOS. This repository is a wrapper specifically designed to build a custom Linux installer (`.deb`) for Debian-flavored distributions.
 
 ### Requirements for Linux Users
