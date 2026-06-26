@@ -35,6 +35,10 @@ jobs:
 
       - name: Build packages and apps
         working-directory: ./upstream/superset
+        env:
+          NEXT_PUBLIC_API_URL: "http://localhost:3001"
+          NEXT_PUBLIC_WEB_URL: "http://localhost:3000"
+          NEXT_PUBLIC_MARKETING_URL: "http://localhost:3000"
         run: bun run build
 
       - name: Package Desktop Installer
