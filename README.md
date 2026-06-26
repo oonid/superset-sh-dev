@@ -9,6 +9,28 @@ To run Superset on Debian/Ubuntu, you will need:
 
 *Note: The unified TypeScript CLI is natively bundled **inside** the `.deb` installer, so you do not need to download the CLI separately!*
 
+## Installation & Usage
+
+### 1. Install the Package
+Once you have downloaded the `.deb` installer from the Releases page, install it via the terminal:
+```bash
+sudo dpkg -i superset-dev-1.12.5-amd64.deb
+sudo apt-get install -f # To resolve any missing system dependencies
+```
+
+### 2. Launch the Desktop App
+You can launch the main graphical Desktop application from your OS application menu, or directly from the terminal by typing:
+```bash
+superset-dev
+```
+
+### 3. Use the Companion CLI (Backend Daemon)
+The custom TypeScript CLI / Backend daemon is natively bundled directly inside the Linux installation directory. To use the CLI (for example, to start the local proxy servers), invoke the embedded binary directly:
+```bash
+/opt/superset-dev/resources/resources/bin/superset-dev --help
+```
+*Tip: You may want to create a symlink or an alias in your `~/.bashrc` for easier access to the CLI!*
+
 ## Architecture
 - `upstream/superset/`: The upstream Superset monorepo (submodule).
 
