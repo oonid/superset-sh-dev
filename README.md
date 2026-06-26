@@ -25,9 +25,14 @@ superset-dev
 ```
 
 ### 3. Use the Companion CLI (Backend Daemon)
-The custom TypeScript CLI / Backend daemon is natively bundled directly inside the Linux installation directory. To use the CLI (for example, to start the local proxy servers), invoke the embedded binary directly:
+The custom TypeScript CLI / Backend daemon is natively bundled directly inside the Linux installation directory. To use the CLI (for example, to start the local proxy servers), invoke the embedded binary and pass in your environment variables.
+
+Here is a complete example to start the offline daemon:
 ```bash
-/opt/superset-dev/resources/resources/bin/superset-dev --help
+DATABASE_URL="postgres://postgres:postgres@db.localtest.me:4444/main" \
+GITHUB_APP_ID="xxxxx" \
+GITHUB_APP_PRIVATE_KEY="$(cat superset-sh-dev.privatekey.pem)" \
+/opt/superset-dev/resources/resources/bin/superset-dev serve --web-port 3000 --api-port 3001
 ```
 *Tip: You may want to create a symlink or an alias in your `~/.bashrc` for easier access to the CLI!*
 
