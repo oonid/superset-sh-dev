@@ -1,5 +1,8 @@
 # Superset Linux Installer Build
 
+> **⚠️ License Modification Notice**  
+> This repository contains a modified version of the original Superset software. Specifically, the source code within the `upstream/superset/` submodule has been altered from its original form. These modifications introduce a custom offline backend (`packages/cli-wrapper`) and adjust internal Desktop code to run entirely locally, bypassing the original proprietary cloud infrastructure.  
+> These changes are distributed in accordance with the [Elastic License 2.0 (ELv2)](upstream/superset/LICENSE.md). This project is intended for local use and is **not** provided as a hosted/managed cloud service.
 [**Superset**](https://github.com/superset-sh/superset) is the code editor for AI agents. It orchestrates swarms of CLI-based coding agents (like Claude Code, Codex, and Cursor) in parallel, completely isolating them in their own Git worktrees to prevent interference. 
 
 The upstream Superset application currently only natively targets macOS. This repository is a wrapper specifically designed to build a custom Linux installer (`.deb`) for Debian-flavored distributions.
