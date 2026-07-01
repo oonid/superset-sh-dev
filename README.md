@@ -75,5 +75,14 @@ The custom embedded CLI completely replaces the official cloud infrastructure:
 - **GitHub App Integration:** Full port of the GitHub installation flow! Includes generating secure `state` JWTs, handling local callbacks (`/api/github/callback`), mapping to the correct session User ID, and pushing installation metadata straight into the local database.
 - **ElectricSQL Disconnect Guard:** Prevents the desktop from infinite-looping when trying to sync with the missing cloud ElectricSQL server.
 
+### 🔌 Implemented Mock tRPC Endpoints
+The backend daemon dynamically intercepts and implements the following tRPC endpoints to simulate the cloud:
+- **User & Auth:** `user.me`, `user.completeOnboarding`, `organization.list`
+- **Devices & Hosts:** `device.registerDevice`, `host.ensure`, `v2Host.rename`
+- **Projects:** `v2Project.create`, `v2Project.get`, `v2Project.list`, `v2Project.update`, `v2Project.delete`, `v2Project.findByGitHubRemote`, `v2Project.linkRepoCloneUrl`
+- **Workspaces:** `v2Workspace.create`, `v2Workspace.update`, `v2Workspace.list`, `v2Workspace.delete` / `v2Workspace.deleteMainForHost`, `v2Workspace.getFromHost`, `v2Workspace.listFromHost`
+- **Integrations:** `integration.github.getInstallation`, `git.getStatus`, `chat.getModels`
+- **Operations:** `workspaceCleanup.inspect`, `workspaceCleanup.destroy`
+
 ## Known Linux Packaging Quirks
 **Redundant SQLite Migrations Path:** The upstream codebase expects Electron database migrations to be located at `process.resourcesPath + "/resources/migrations"`. During the `.deb` compilation, this technically points to a nested `resources/resources/` directory structure. For now, this is left untouched in the upstream code to avoid merge conflicts.
