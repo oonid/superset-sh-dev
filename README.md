@@ -3,46 +3,61 @@
 > **⚠️ License Modification Notice**  
 > This repository contains a modified version of the original Superset software. Specifically, the source code within the `upstream/superset/` submodule has been altered from its original form. These modifications introduce a custom offline backend (`packages/cli-wrapper`) and adjust internal Desktop code to run entirely locally, bypassing the original proprietary cloud infrastructure.  
 > These changes are distributed in accordance with the [Elastic License 2.0 (ELv2)](upstream/superset/LICENSE.md). This project is intended for local use and is **not** provided as a hosted/managed cloud service.
+
 [**Superset**](https://github.com/superset-sh/superset) is the code editor for AI agents. It orchestrates swarms of CLI-based coding agents (like Claude Code, Codex, and Cursor) in parallel, completely isolating them in their own Git worktrees to prevent interference. 
 
-The upstream Superset application currently only natively targets macOS. This repository is a wrapper specifically designed to build a custom Linux installer (`.deb`) for Debian-flavored distributions.
+The upstream Superset application natively provides an `.AppImage` for Linux. This repository is a wrapper specifically designed to build **native `.deb` installers** for Debian-flavored distributions (like Ubuntu, Debian, Pop!_OS, etc).
 
-### Requirements for Linux Users
-To run Superset on Debian/Ubuntu, you will need:
-1. **The `.deb` Installer**: Download the latest release from the [GitHub Releases](https://github.com/oonid/superset-sh-dev/releases) page. (Automatically built via GitHub Actions!)
-2. **PostgreSQL**: A running local PostgreSQL instance for the backend database.
+We build and provide **two different flavors** of the `.deb` installer on our [GitHub Releases](https://github.com/oonid/superset-sh-dev/releases) page:
 
-*Note: The unified TypeScript CLI is natively bundled **inside** the `.deb` installer, so you do not need to download the CLI separately!*
+## 1. The Official Cloud Version (`superset-*.deb`)
+This version is functionally **identical** to the official upstream `AppImage`, but packaged cleanly as a native Debian package.
+* **How it works:** It connects directly to the official `superset.sh` cloud servers (API, Web, and ElectricSQL relay).
+* **Benefits:** Zero setup required. Just install it, click "Log in with GitHub", and you're immediately placed on the official Superset free plan.
+* **Use this if:** You just want to use Superset easily without managing your own servers and database.
 
-## Local Backend Services (Docker)
-Because the Linux wrapper relies on a local backend instead of the official cloud services, you must run the required backing infrastructure (PostgreSQL, Neon Proxy, and ElectricSQL). A complete `docker-compose.yml` is provided in the `upstream/superset` directory for this exact purpose.
+## 2. The Local Dev Version (`superset-dev-*.deb`)
+This version is our custom, heavily-modified fork designed to run **completely offline and privately**. It intercepts all cloud traffic and routes it to an embedded mock backend daemon (`packages/cli-wrapper`).
+* **How it works:** It requires you to run local infrastructure (PostgreSQL via Docker) and launch the bundled backend daemon alongside the app.
+* **Benefits:** 100% private data. No cloud limits. Complete control over your database.
+* **Use this if:** You are developing Superset locally, or you require strict offline data isolation.
 
-To spin up your local infrastructure using Docker:
+---
+
+## Installation & Usage: Official Cloud Version
+
+1. Download the `superset-<version>-linux-amd64.deb` file from the Releases page.
+2. Install it via the terminal:
+   ```bash
+   sudo dpkg -i superset-1.13.0-linux-amd64.deb
+   sudo apt-get install -f # Resolves any missing system dependencies (like libnss3)
+   ```
+3. Launch the main application from your OS application menu, or run `superset` in your terminal!
+
+---
+
+## Installation & Usage: Local Dev Version
+
+### 1. Start the Local Infrastructure (Docker)
+Because the `superset-dev` flavor relies on a local backend instead of the official cloud, you must run the required backing infrastructure (PostgreSQL, Neon Proxy, and ElectricSQL). 
+
+A complete `docker-compose.yml` is provided in the `upstream/superset` directory.
 ```bash
 cd upstream/superset
 docker compose up -d
 ```
-This will automatically provision your database (`:5432`), the Neon HTTP proxy (`:4444`), and ElectricSQL (`:3100`), perfectly matching the default environment variables expected by the `.deb` application.
+This automatically provisions your database (`:5432`), the Neon HTTP proxy (`:4444`), and ElectricSQL (`:3100`).
 
-## Installation & Usage
-
-### 1. Install the Package
-Once you have downloaded the `.deb` installer from the Releases page, install it via the terminal:
+### 2. Install the Package
+Download the `superset-dev-<version>-linux-amd64.deb` file from the Releases page.
 ```bash
-sudo dpkg -i superset-dev-1.12.5-amd64.deb
-sudo apt-get install -f # To resolve any missing system dependencies
-```
-
-### 2. Launch the Desktop App
-You can launch the main graphical Desktop application from your OS application menu, or directly from the terminal by typing:
-```bash
-superset-dev
+sudo dpkg -i superset-dev-1.13.0-linux-amd64.deb
+sudo apt-get install -f
 ```
 
 ### 3. Use the Companion CLI (Backend Daemon)
-The custom TypeScript CLI / Backend daemon is natively bundled directly inside the Linux installation directory. To use the CLI (for example, to start the local proxy servers), invoke the embedded binary and pass in your environment variables.
+The custom TypeScript CLI / Backend daemon is natively bundled directly inside the Linux installation directory. To start the local proxy servers and mock backend, invoke the embedded binary and pass in your environment variables:
 
-Here is a complete example to start the offline daemon:
 ```bash
 DATABASE_URL="postgres://postgres:postgres@db.localtest.me:4444/main" \
 GITHUB_APP_ID="xxxxx" \
@@ -51,11 +66,17 @@ GITHUB_APP_PRIVATE_KEY="$(cat superset-sh-dev.privatekey.pem)" \
 ```
 *Tip: You may want to create a symlink or an alias in your `~/.bashrc` for easier access to the CLI!*
 
-## Architecture & Responsibility Breakdown
-- `upstream/superset/`: The upstream Superset monorepo (submodule).
-- `packages/cli-wrapper/`: Our custom TypeScript CLI layer that powers the local backend.
+### 4. Launch the Desktop App
+With the daemon running, open a new terminal and run:
+```bash
+superset-dev
+```
 
-Because this Linux build is designed to run **completely offline** (without the official Superset cloud services), the responsibilities are split between the graphical Desktop app and the custom `serve` daemon.
+---
+
+## Architecture & Responsibility Breakdown (Local Dev Version)
+
+When using the `superset-dev` flavor, the responsibilities are split between the graphical Desktop app and the custom `serve` daemon.
 
 ### 🖥️ The Superset Desktop App (Frontend)
 The GUI acts purely as the presentation and orchestration layer:
@@ -74,6 +95,7 @@ The custom embedded CLI completely replaces the official cloud infrastructure:
 - **Secure Origin Interceptor:** Patched into the Desktop App's main process to allow local CORS traffic natively.
 - **GitHub App Integration:** Full port of the GitHub installation flow! Includes generating secure `state` JWTs, handling local callbacks (`/api/github/callback`), mapping to the correct session User ID, and pushing installation metadata straight into the local database.
 - **ElectricSQL Disconnect Guard:** Prevents the desktop from infinite-looping when trying to sync with the missing cloud ElectricSQL server.
+- **Version Poller:** Periodically queries GitHub releases to provide native update notifications mirroring the official AppImage behavior.
 
 ### 🔌 Implemented Mock tRPC Endpoints
 The backend daemon dynamically intercepts and implements the following tRPC endpoints to simulate the cloud:

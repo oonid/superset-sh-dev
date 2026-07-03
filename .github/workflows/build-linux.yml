@@ -33,32 +33,54 @@ jobs:
         working-directory: ./upstream/superset
         run: bun install
 
-      - name: Configure Local Endpoints
+      - name: Build Official Cloud Version (superset)
         working-directory: ./upstream/superset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Ensure no local .env exists to use default cloud URLs
+          rm -f .env
+          # Change productName to 'superset'
+          sed -i 's/"productName": "superset-dev"/"productName": "superset"/' apps/desktop/package.json
+          bun run build
+          # Remove the dev binary so it doesn't get packaged in the official build
+          rm -f apps/desktop/dist/resources/bin/superset-dev
+          cd apps/desktop
+          bun run package -- --publish never
+          # Move it to a separate directory to avoid conflicts
+          mkdir -p release/official
+          mv release/*.deb release/official/
+
+      - name: Build Local Dev Version (superset-dev)
+        working-directory: ./upstream/superset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Inject localhost endpoints
           echo "NEXT_PUBLIC_API_URL=http://localhost:3001" > .env
           echo "NEXT_PUBLIC_WEB_URL=http://localhost:3000" >> .env
           echo "NEXT_PUBLIC_MARKETING_URL=http://localhost:3000" >> .env
           echo "NEXT_PUBLIC_ELECTRIC_URL=http://localhost:3001" >> .env
+          # Revert productName to 'superset-dev'
+          sed -i 's/"productName": "superset"/"productName": "superset-dev"/' apps/desktop/package.json
+          bun run build
+          cd apps/desktop
+          bun run package -- --publish never
+          mkdir -p release/dev
+          mv release/*.deb release/dev/
 
-      - name: Build packages and apps
-        working-directory: ./upstream/superset
-        run: bun run build
-
-      - name: Package Desktop Installer
-        working-directory: ./upstream/superset/apps/desktop
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun run package -- --publish never
-
-      - name: Upload .deb Artifact
+      - name: Upload .deb Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: superset-dev-linux-installer
-          path: upstream/superset/apps/desktop/release/*.deb
+          name: superset-linux-installers
+          path: |
+            upstream/superset/apps/desktop/release/official/*.deb
+            upstream/superset/apps/desktop/release/dev/*.deb
 
       - name: Release to GitHub
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: upstream/superset/apps/desktop/release/*.deb
+          files: |
+            upstream/superset/apps/desktop/release/official/*.deb
+            upstream/superset/apps/desktop/release/dev/*.deb
