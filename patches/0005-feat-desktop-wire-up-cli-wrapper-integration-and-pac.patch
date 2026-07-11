@@ -1,0 +1,187 @@
+From 8b4b78b9daf3121a7db064472c933175a60b486a Mon Sep 17 00:00:00 2001
+From: oon arfiandwi <oon.arfiandwi@gmail.com>
+Date: Fri, 3 Jul 2026 21:39:18 +0700
+Subject: [PATCH 5/8] feat(desktop): wire up cli-wrapper integration and
+ packaging
+
+---
+ apps/desktop/electron-builder.ts              |  4 +--
+ apps/desktop/package.json                     |  2 +-
+ apps/desktop/scripts/build-bundled-cli.ts     | 27 +++++++++++++----
+ apps/desktop/src/main/index.ts                | 29 +++++++++++++++++++
+ .../CollectionsProvider.tsx                   |  6 ++--
+ .../src/renderer/routes/sign-in/page.tsx      |  4 ++-
+ 6 files changed, 60 insertions(+), 12 deletions(-)
+
+diff --git a/apps/desktop/electron-builder.ts b/apps/desktop/electron-builder.ts
+index f7712a06b..7692ff7b1 100644
+--- a/apps/desktop/electron-builder.ts
++++ b/apps/desktop/electron-builder.ts
+@@ -145,8 +145,8 @@ const config: Configuration = {
+ 		...(existsSync(linuxIconPath) ? { icon: linuxIconPath } : {}),
+ 		category: "Utility",
+ 		synopsis: pkg.description,
+-		target: ["AppImage"],
+-		artifactName: `superset-\${version}-\${arch}.\${ext}`,
++		target: ["AppImage", "deb"],
++		artifactName: `\${productName}-\${version}-\${arch}.\${ext}`,
+ 	},
+ 
+ 	// Windows
+diff --git a/apps/desktop/package.json b/apps/desktop/package.json
+index 4cf229cad..1326a61d6 100644
+--- a/apps/desktop/package.json
++++ b/apps/desktop/package.json
+@@ -1,6 +1,6 @@
+ {
+ 	"name": "@superset/desktop",
+-	"productName": "Superset",
++	"productName": "superset-dev",
+ 	"description": "The last developer tool you'll ever need",
+ 	"version": "1.14.3",
+ 	"main": "./dist/main/index.js",
+diff --git a/apps/desktop/scripts/build-bundled-cli.ts b/apps/desktop/scripts/build-bundled-cli.ts
+index 7bf8a6d25..bb0509aa9 100644
+--- a/apps/desktop/scripts/build-bundled-cli.ts
++++ b/apps/desktop/scripts/build-bundled-cli.ts
+@@ -82,25 +82,42 @@ const repoRoot = resolve(desktopDir, "../..");
+ config({ path: resolve(repoRoot, ".env"), override: false, quiet: true });
+ 
+ const cliDir = resolve(repoRoot, "packages/cli");
+-const outfile = resolve(
++const wrapperDir = resolve(repoRoot, "packages/cli-wrapper");
++
++const outfileCli = resolve(
+ 	desktopDir,
+ 	"dist/resources/bin",
+ 	TARGET_PLATFORM === "win32" ? "superset.exe" : "superset",
+ );
++const outfileWrapper = resolve(
++	desktopDir,
++	"dist/resources/bin",
++	TARGET_PLATFORM === "win32" ? "superset-dev.exe" : "superset-dev",
++);
+ 
+-mkdirSync(dirname(outfile), { recursive: true });
++mkdirSync(dirname(outfileCli), { recursive: true });
+ 
+ await run(
+ 	"bun",
+-	["run", "build", `--target=${getBunTarget()}`, `--outfile=${outfile}`],
++	["run", "build", `--target=${getBunTarget()}`, `--outfile=${outfileCli}`],
+ 	{
+ 		cwd: cliDir,
+ 		env: buildCliBuildEnv(),
+ 	},
+ );
+ 
++await run(
++	"bun",
++	["run", "build", `--target=${getBunTarget()}`, `--outfile=${outfileWrapper}`],
++	{
++		cwd: wrapperDir,
++		env: buildCliBuildEnv(),
++	},
++);
++
+ if (TARGET_PLATFORM !== "win32") {
+-	chmodSync(outfile, 0o755);
++	chmodSync(outfileCli, 0o755);
++	chmodSync(outfileWrapper, 0o755);
+ }
+ 
+-console.log(`[desktop] bundled CLI written to ${outfile}`);
++console.log(`[desktop] bundled CLIs written to ${outfileCli} and ${outfileWrapper}`);
+diff --git a/apps/desktop/src/main/index.ts b/apps/desktop/src/main/index.ts
+index 64831c67d..5e69d7255 100644
+--- a/apps/desktop/src/main/index.ts
++++ b/apps/desktop/src/main/index.ts
+@@ -10,6 +10,14 @@ import {
+ 	protocol,
+ 	session,
+ } from "electron";
++
++// Chrome sandbox requires user namespaces, which are unavailable in Docker.
++// Set ELECTRON_NO_SANDBOX=1 to opt in to --no-sandbox (dev/Docker only).
++if (process.env.ELECTRON_NO_SANDBOX === "1") {
++	app.commandLine.appendSwitch("no-sandbox");
++	app.commandLine.appendSwitch("disable-dev-shm-usage");
++}
++
+ import { makeAppSetup } from "lib/electron-app/factories/app/setup";
+ import {
+ 	handleAuthCallback,
+@@ -343,6 +351,27 @@ if (!gotTheLock) {
+ 		requestAppleEventsAccess();
+ 		requestLocalNetworkAccess();
+ 
++		// Fix 'null' Origin headers sent by file:// protocol
++		const handleOrigin = (
++			details: Electron.OnBeforeSendHeadersListenerDetails,
++			callback: (beforeSendResponse: Electron.BeforeSendResponse) => void
++		) => {
++			const originKey = Object.keys(details.requestHeaders).find(
++				(k) => k.toLowerCase() === "origin"
++			);
++			if (originKey) {
++				if (details.requestHeaders[originKey] === "null") {
++					details.requestHeaders[originKey] = "superset://app";
++				}
++			} else {
++				details.requestHeaders["Origin"] = "superset://app";
++			}
++			callback({ requestHeaders: details.requestHeaders });
++		};
++		const filter = { urls: ["http://localhost:*/*", "http://127.0.0.1:*/*", "https://*.superset.sh/*"] };
++		session.defaultSession.webRequest.onBeforeSendHeaders(filter, handleOrigin);
++		session.fromPartition("persist:superset").webRequest.onBeforeSendHeaders(filter, handleOrigin);
++
+ 		// Must register on both default session and the app's custom partition
+ 		const iconProtocolHandler = (request: Request) => {
+ 			const url = new URL(request.url);
+diff --git a/apps/desktop/src/renderer/routes/_authenticated/providers/CollectionsProvider/CollectionsProvider.tsx b/apps/desktop/src/renderer/routes/_authenticated/providers/CollectionsProvider/CollectionsProvider.tsx
+index f55622950..0f02f24b1 100644
+--- a/apps/desktop/src/renderer/routes/_authenticated/providers/CollectionsProvider/CollectionsProvider.tsx
++++ b/apps/desktop/src/renderer/routes/_authenticated/providers/CollectionsProvider/CollectionsProvider.tsx
+@@ -31,7 +31,7 @@ export function preloadActiveOrganizationCollections(
+ }
+ 
+ export function CollectionsProvider({ children }: { children: ReactNode }) {
+-	const { data: session, refetch: refetchSession } = authClient.useSession();
++	const { data: session } = authClient.useSession();
+ 	const [isSwitching, setIsSwitching] = useState(false);
+ 	const activeOrganizationId = env.SKIP_ENV_VALIDATION
+ 		? MOCK_ORG_ID
+@@ -44,12 +44,12 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
+ 			try {
+ 				await authClient.organization.setActive({ organizationId });
+ 				await preloadCollections(organizationId);
+-				await refetchSession();
++				await authClient.getSession({ fetchOptions: { force: true } });
+ 			} finally {
+ 				setIsSwitching(false);
+ 			}
+ 		},
+-		[activeOrganizationId, refetchSession],
++		[activeOrganizationId],
+ 	);
+ 
+ 	useEffect(() => {
+diff --git a/apps/desktop/src/renderer/routes/sign-in/page.tsx b/apps/desktop/src/renderer/routes/sign-in/page.tsx
+index 6b62c115b..2a93155dd 100644
+--- a/apps/desktop/src/renderer/routes/sign-in/page.tsx
++++ b/apps/desktop/src/renderer/routes/sign-in/page.tsx
+@@ -158,7 +158,9 @@ function SignInPage() {
+ 					</div>
+ 
+ 					<div className="flex flex-col gap-3 w-full max-w-xs">
+-						{env.NODE_ENV === "development" && (
++						{(env.NODE_ENV === "development" || 
++						  env.NEXT_PUBLIC_API_URL.startsWith("http://localhost:") || 
++						  env.NEXT_PUBLIC_API_URL.startsWith("http://127.0.0.1:")) && (
+ 							<Button
+ 								variant="outline"
+ 								size="lg"
+-- 
+2.43.0
+

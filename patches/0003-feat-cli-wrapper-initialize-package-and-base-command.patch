@@ -1,0 +1,635 @@
+From 0c001af6154f941b8f14b3a59e0f607fb8d1a5ef Mon Sep 17 00:00:00 2001
+From: oon arfiandwi <oon.arfiandwi@gmail.com>
+Date: Fri, 3 Jul 2026 21:39:05 +0700
+Subject: [PATCH 3/8] feat(cli-wrapper): initialize package and base commands
+
+---
+ bun.lock                                      | 45 +++++++++++++++++++
+ packages/cli-wrapper/cli.config.ts            | 29 ++++++++++++
+ packages/cli-wrapper/package.json             | 31 +++++++++++++
+ packages/cli-wrapper/scripts/proxy.ts         | 28 ++++++++++++
+ .../src/commands/agents/create/command.ts     |  1 +
+ .../src/commands/agents/list/command.ts       |  1 +
+ .../src/commands/auth/login/command.ts        |  1 +
+ .../src/commands/auth/logout/command.ts       |  1 +
+ .../src/commands/auth/whoami/command.ts       |  1 +
+ .../commands/automations/create/command.ts    |  1 +
+ .../commands/automations/delete/command.ts    |  1 +
+ .../src/commands/automations/get/command.ts   |  1 +
+ .../src/commands/automations/list/command.ts  |  1 +
+ .../src/commands/automations/pause/command.ts |  1 +
+ .../automations/prompt/get/command.ts         |  1 +
+ .../automations/prompt/set/command.ts         |  1 +
+ .../commands/automations/resume/command.ts    |  1 +
+ .../src/commands/automations/run/command.ts   |  1 +
+ .../commands/automations/update/command.ts    |  1 +
+ .../src/commands/hosts/list/command.ts        |  1 +
+ .../cli-wrapper/src/commands/middleware.ts    | 26 +++++++++++
+ .../src/commands/organization/list/command.ts |  1 +
+ .../organization/members/list/command.ts      |  1 +
+ .../commands/organization/switch/command.ts   |  1 +
+ .../src/commands/projects/create/command.ts   |  1 +
+ .../src/commands/projects/list/command.ts     |  1 +
+ .../src/commands/projects/setup/command.ts    |  1 +
+ .../cli-wrapper/src/commands/serve/command.ts | 32 +++++++++++++
+ .../cli-wrapper/src/commands/start/command.ts |  1 +
+ .../src/commands/status/command.ts            |  1 +
+ .../cli-wrapper/src/commands/stop/command.ts  |  1 +
+ .../src/commands/tasks/create/command.ts      |  1 +
+ .../src/commands/tasks/delete/command.ts      |  1 +
+ .../src/commands/tasks/get/command.ts         |  1 +
+ .../src/commands/tasks/list/command.ts        |  1 +
+ .../commands/tasks/statuses/list/command.ts   |  1 +
+ .../src/commands/tasks/update/command.ts      |  1 +
+ .../src/commands/terminals/create/command.ts  |  1 +
+ .../src/commands/update/command.ts            |  1 +
+ .../src/commands/workspaces/create/command.ts |  1 +
+ .../src/commands/workspaces/delete/command.ts |  1 +
+ .../src/commands/workspaces/list/command.ts   |  1 +
+ .../src/commands/workspaces/open/command.ts   |  1 +
+ .../src/commands/workspaces/update/command.ts |  1 +
+ 44 files changed, 229 insertions(+)
+ create mode 100644 packages/cli-wrapper/cli.config.ts
+ create mode 100644 packages/cli-wrapper/package.json
+ create mode 100644 packages/cli-wrapper/scripts/proxy.ts
+ create mode 100644 packages/cli-wrapper/src/commands/agents/create/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/agents/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/auth/login/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/auth/logout/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/auth/whoami/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/create/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/delete/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/get/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/pause/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/prompt/get/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/prompt/set/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/resume/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/run/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/automations/update/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/hosts/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/middleware.ts
+ create mode 100644 packages/cli-wrapper/src/commands/organization/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/organization/members/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/organization/switch/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/projects/create/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/projects/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/projects/setup/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/serve/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/start/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/status/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/stop/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/tasks/create/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/tasks/delete/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/tasks/get/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/tasks/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/tasks/statuses/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/tasks/update/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/terminals/create/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/update/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/workspaces/create/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/workspaces/delete/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/workspaces/list/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/workspaces/open/command.ts
+ create mode 100644 packages/cli-wrapper/src/commands/workspaces/update/command.ts
+
+diff --git a/bun.lock b/bun.lock
+index 7b44a7e80..67e649b7f 100644
+--- a/bun.lock
++++ b/bun.lock
+@@ -754,6 +754,29 @@
+         "typescript": "6.0.3",
+       },
+     },
++    "packages/cli-wrapper": {
++      "name": "@superset/cli-wrapper",
++      "version": "1.0.0",
++      "dependencies": {
++        "@hono/node-server": "1.19.13",
++        "@superset/cli": "workspace:*",
++        "@superset/cli-framework": "workspace:*",
++        "@superset/db": "workspace:*",
++        "@superset/shared": "workspace:*",
++        "drizzle-orm": "0.45.2",
++        "hono": "4.12.25",
++        "jsonwebtoken": "^9.0.2",
++        "postgres": "^3.4.4",
++        "uuid": "14.0.0",
++      },
++      "devDependencies": {
++        "@superset/typescript": "workspace:*",
++        "@types/jsonwebtoken": "^9.0.5",
++        "@types/uuid": "11.0.0",
++        "bun-types": "1.3.11",
++        "typescript": "6.0.3",
++      },
++    },
+     "packages/db": {
+       "name": "@superset/db",
+       "version": "0.1.0",
+@@ -2777,6 +2800,8 @@
+ 
+     "@superset/cli-framework": ["@superset/cli-framework@workspace:packages/cli-framework"],
+ 
++    "@superset/cli-wrapper": ["@superset/cli-wrapper@workspace:packages/cli-wrapper"],
++
+     "@superset/db": ["@superset/db@workspace:packages/db"],
+ 
+     "@superset/desktop": ["@superset/desktop@workspace:apps/desktop"],
+@@ -3187,6 +3212,8 @@
+ 
+     "@types/json-schema": ["@types/json-schema@7.0.15", "", {}, "sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA=="],
+ 
++    "@types/jsonwebtoken": ["@types/jsonwebtoken@9.0.10", "", { "dependencies": { "@types/ms": "*", "@types/node": "*" } }, "sha512-asx5hIG9Qmf/1oStypjanR7iKTv0gXQ1Ov/jfrX6kS/EO0OFni8orbmGCn0672NHR3kXHwpAwR+B368ZGN/2rA=="],
++
+     "@types/keyv": ["@types/keyv@3.1.4", "", { "dependencies": { "@types/node": "*" } }, "sha512-BQ5aZNSCpj7D6K2ksrRCTmKRLEpnPvWDiLPfoGyhZ++8YtiK9d/3DBKPJgry359X/P1PfruyYwvnvwFjuEiEIg=="],
+ 
+     "@types/linkify-it": ["@types/linkify-it@3.0.5", "", {}, "sha512-yg6E+u0/+Zjva+buc3EIb+29XEg4wltq7cSmd4Uc2EE/1nUVmxyzpX6gUXD0V8jIrG0r7YeOGVIbYRkxeooCtw=="],
+@@ -4767,6 +4794,8 @@
+ 
+     "jsonfile": ["jsonfile@6.2.0", "", { "dependencies": { "universalify": "^2.0.0" }, "optionalDependencies": { "graceful-fs": "^4.1.6" } }, "sha512-FGuPw30AdOIUTRMC2OMRtQV+jkVj2cfPqSeWXv1NEAJ1qZ5zb1X6z1mFhbfOB/iy3ssJCD+3KuZ8r8C3uVFlAg=="],
+ 
++    "jsonwebtoken": ["jsonwebtoken@9.0.3", "", { "dependencies": { "jws": "^4.0.1", "lodash.includes": "^4.3.0", "lodash.isboolean": "^3.0.3", "lodash.isinteger": "^4.0.4", "lodash.isnumber": "^3.0.3", "lodash.isplainobject": "^4.0.6", "lodash.isstring": "^4.0.1", "lodash.once": "^4.0.0", "ms": "^2.1.1", "semver": "^7.5.4" } }, "sha512-MT/xP0CrubFRNLNKvxJ2BYfy53Zkm++5bX9dtuPbqAeQpTVe0MQTFhao8+Cp//EmJp244xt6Drw/GVEGCUj40g=="],
++
+     "jszip": ["jszip@3.10.1", "", { "dependencies": { "lie": "~3.3.0", "pako": "~1.0.2", "readable-stream": "~2.3.6", "setimmediate": "^1.0.5" } }, "sha512-xXDvecyTpGLrqFrvkrUSoxxfJI5AH7U8zxxtVclpsUtMCq4JQ290LY8AW5c7Ggnr/Y/oK+bQMbqK2qmtk3pN4g=="],
+ 
+     "jwa": ["jwa@2.0.1", "", { "dependencies": { "buffer-equal-constant-time": "^1.0.1", "ecdsa-sig-formatter": "1.0.11", "safe-buffer": "^5.0.1" } }, "sha512-hRF04fqJIP8Abbkq5NKGN0Bbr3JxlQ+qhZufXVr0DvujKy93ZCbXZMHDL4EOtodSbCWxOqR8MS1tXA5hwqCXDg=="],
+@@ -4863,10 +4892,24 @@
+ 
+     "lodash.escaperegexp": ["lodash.escaperegexp@4.1.2", "", {}, "sha512-TM9YBvyC84ZxE3rgfefxUWiQKLilstD6k7PTGt6wfbtXF8ixIJLOL3VYyV/z+ZiPLsVxAsKAFVwWlWeb2Y8Yyw=="],
+ 
++    "lodash.includes": ["lodash.includes@4.3.0", "", {}, "sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w=="],
++
++    "lodash.isboolean": ["lodash.isboolean@3.0.3", "", {}, "sha512-Bz5mupy2SVbPHURB98VAcw+aHh4vRV5IPNhILUCsOzRmsTmSQ17jIuqopAentWoehktxGd9e/hbIXq980/1QJg=="],
++
+     "lodash.isequal": ["lodash.isequal@4.5.0", "", {}, "sha512-pDo3lu8Jhfjqls6GkMgpahsF9kCyayhgykjyLMNFTKWrpVdAQtYyB4muAMWozBB4ig/dtWAmsMxLEI8wuz+DYQ=="],
+ 
++    "lodash.isinteger": ["lodash.isinteger@4.0.4", "", {}, "sha512-DBwtEWN2caHQ9/imiNeEA5ys1JoRtRfY3d7V9wkqtbycnAmTvRRmbHKDV4a0EYc678/dia0jrte4tjYwVBaZUA=="],
++
++    "lodash.isnumber": ["lodash.isnumber@3.0.3", "", {}, "sha512-QYqzpfwO3/CWf3XP+Z+tkQsfaLL/EnUlXWVkIk5FUPc4sBdTehEqZONuyRt2P67PXAk+NXmTBcc97zw9t1FQrw=="],
++
++    "lodash.isplainobject": ["lodash.isplainobject@4.0.6", "", {}, "sha512-oSXzaWypCMHkPC3NvBEaPHf0KsA5mvPrOPgQWDsbg8n7orZ290M0BmC/jgRZ4vcJ6DTAhjrsSYgdsW/F+MFOBA=="],
++
++    "lodash.isstring": ["lodash.isstring@4.0.1", "", {}, "sha512-0wJxfxH1wgO3GrbuP+dTTk7op+6L41QCXbGINEmD+ny/G/eCqGzxyCsh7159S+mgDDcoarnBw6PC1PS5+wUGgw=="],
++
+     "lodash.merge": ["lodash.merge@4.6.2", "", {}, "sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ=="],
+ 
++    "lodash.once": ["lodash.once@4.1.1", "", {}, "sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg=="],
++
+     "lodash.samplesize": ["lodash.samplesize@4.2.0", "", {}, "sha512-1ZhKV7/nuISuaQdxfCqrs4HHxXIYN+0Z4f7NMQn2PHkxFZJGavJQ1j/paxyJnLJmN2ZamNN6SMepneV+dCgQTA=="],
+ 
+     "lodash.throttle": ["lodash.throttle@4.1.1", "", {}, "sha512-wIkUCfVKpVsWo3JSZlc+8MB5it+2AN5W8J7YVMST30UrvcQNZ1Okbj+rbVniijTWE6FGYy4XJq/rHkas8qJMLQ=="],
+@@ -5419,6 +5462,8 @@
+ 
+     "postcss-selector-parser": ["postcss-selector-parser@6.0.10", "", { "dependencies": { "cssesc": "^3.0.0", "util-deprecate": "^1.0.2" } }, "sha512-IQ7TZdoaqbT+LCpShg46jnZVlhWD2w6iQYAcYXfHARZ7X1t/UGhhceQDs5X0cGqKvYlHNOuv7Oa1xmb0oQuA3w=="],
+ 
++    "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
++
+     "postgres-array": ["postgres-array@2.0.0", "", {}, "sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA=="],
+ 
+     "postgres-bytea": ["postgres-bytea@1.0.1", "", {}, "sha512-5+5HqXnsZPE65IJZSMkZtURARZelel2oXUEO8rH83VS/hxH5vv1uHquPg5wZs8yMAfdv971IU+kcPUczi7NVBQ=="],
+diff --git a/packages/cli-wrapper/cli.config.ts b/packages/cli-wrapper/cli.config.ts
+new file mode 100644
+index 000000000..37bce2060
+--- /dev/null
++++ b/packages/cli-wrapper/cli.config.ts
+@@ -0,0 +1,29 @@
++import { boolean, defineConfig, string } from "@superset/cli-framework";
++
++const VERSION = "1.0.0";
++
++export default defineConfig({
++	name: "superset",
++	version: VERSION,
++	commandsDir: "./src/commands",
++	outfile: "./dist/superset",
++	define: {
++		"process.env.RELAY_URL": JSON.stringify(
++			process.env.RELAY_URL ?? "https://relay.superset.sh",
++		),
++		"process.env.SUPERSET_API_URL": JSON.stringify(
++			process.env.SUPERSET_API_URL ?? "https://api.superset.sh",
++		),
++		"process.env.SUPERSET_WEB_URL": JSON.stringify(
++			process.env.SUPERSET_WEB_URL ?? "https://app.superset.sh",
++		),
++		"process.env.SUPERSET_VERSION": JSON.stringify(VERSION),
++	},
++	globals: {
++		json: boolean().desc("Output as JSON (auto-on under CI/agent envs)"),
++		quiet: boolean().desc("Output IDs only"),
++		apiKey: string()
++			.env("SUPERSET_API_KEY")
++			.desc("Use a Superset API key (sk_live_…) instead of OAuth login"),
++	},
++});
+diff --git a/packages/cli-wrapper/package.json b/packages/cli-wrapper/package.json
+new file mode 100644
+index 000000000..fa221d467
+--- /dev/null
++++ b/packages/cli-wrapper/package.json
+@@ -0,0 +1,31 @@
++{
++	"name": "@superset/cli-wrapper",
++	"version": "1.0.0",
++	"private": true,
++	"type": "module",
++	"scripts": {
++		"dev": "dotenv -e ../../.env -o -- sh -c 'exec env SUPERSET_API_URL=$NEXT_PUBLIC_API_URL cli-framework dev \"$@\"' --",
++		"build": "cli-framework build",
++		"build:linux-x64": "cli-framework build --target=bun-linux-x64 --outfile=./dist/superset-cli",
++		"typecheck": "tsc --noEmit"
++	},
++	"dependencies": {
++		"@hono/node-server": "1.19.13",
++		"@superset/cli": "workspace:*",
++		"@superset/cli-framework": "workspace:*",
++		"@superset/db": "workspace:*",
++		"@superset/shared": "workspace:*",
++		"drizzle-orm": "0.45.2",
++		"hono": "4.12.25",
++		"jsonwebtoken": "^9.0.2",
++		"postgres": "^3.4.4",
++		"uuid": "14.0.0"
++	},
++	"devDependencies": {
++		"@superset/typescript": "workspace:*",
++		"@types/jsonwebtoken": "^9.0.5",
++		"@types/uuid": "11.0.0",
++		"bun-types": "1.3.11",
++		"typescript": "6.0.3"
++	}
++}
+diff --git a/packages/cli-wrapper/scripts/proxy.ts b/packages/cli-wrapper/scripts/proxy.ts
+new file mode 100644
+index 000000000..e7664e60b
+--- /dev/null
++++ b/packages/cli-wrapper/scripts/proxy.ts
+@@ -0,0 +1,28 @@
++import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
++import { join } from "node:path";
++
++const UPSTREAM_DIR = "../cli/src/commands";
++const TARGET_DIR = "./src/commands";
++
++function scanAndProxy(dir: string, currentPath: string) {
++	const entries = readdirSync(dir);
++	mkdirSync(join(TARGET_DIR, currentPath), { recursive: true });
++
++	for (const entry of entries) {
++		const fullPath = join(dir, entry);
++		const stat = statSync(fullPath);
++		
++		if (stat.isDirectory()) {
++			scanAndProxy(fullPath, join(currentPath, entry));
++		} else if (entry === "command.ts" || entry === "group.ts" || entry === "middleware.ts") {
++			// Write proxy export
++			const proxyPath = join(TARGET_DIR, currentPath, entry);
++			const importPath = `@superset/cli/src/commands/${currentPath ? currentPath + '/' : ''}${entry.replace('.ts', '')}`;
++			writeFileSync(proxyPath, `export { default } from "${importPath}";\n`);
++		}
++	}
++}
++
++console.log("Generating proxy commands...");
++scanAndProxy(UPSTREAM_DIR, "");
++console.log("Done!");
+diff --git a/packages/cli-wrapper/src/commands/agents/create/command.ts b/packages/cli-wrapper/src/commands/agents/create/command.ts
+new file mode 100644
+index 000000000..099a36041
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/agents/create/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/agents/create/command";
+diff --git a/packages/cli-wrapper/src/commands/agents/list/command.ts b/packages/cli-wrapper/src/commands/agents/list/command.ts
+new file mode 100644
+index 000000000..622e60817
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/agents/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/agents/list/command";
+diff --git a/packages/cli-wrapper/src/commands/auth/login/command.ts b/packages/cli-wrapper/src/commands/auth/login/command.ts
+new file mode 100644
+index 000000000..6e82f7b5c
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/auth/login/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/auth/login/command";
+diff --git a/packages/cli-wrapper/src/commands/auth/logout/command.ts b/packages/cli-wrapper/src/commands/auth/logout/command.ts
+new file mode 100644
+index 000000000..d425df0df
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/auth/logout/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/auth/logout/command";
+diff --git a/packages/cli-wrapper/src/commands/auth/whoami/command.ts b/packages/cli-wrapper/src/commands/auth/whoami/command.ts
+new file mode 100644
+index 000000000..771e14ea1
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/auth/whoami/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/auth/whoami/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/create/command.ts b/packages/cli-wrapper/src/commands/automations/create/command.ts
+new file mode 100644
+index 000000000..835f64886
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/create/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/create/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/delete/command.ts b/packages/cli-wrapper/src/commands/automations/delete/command.ts
+new file mode 100644
+index 000000000..14c7fbf1d
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/delete/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/delete/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/get/command.ts b/packages/cli-wrapper/src/commands/automations/get/command.ts
+new file mode 100644
+index 000000000..32ce6da00
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/get/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/get/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/list/command.ts b/packages/cli-wrapper/src/commands/automations/list/command.ts
+new file mode 100644
+index 000000000..3ee5d35fe
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/list/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/pause/command.ts b/packages/cli-wrapper/src/commands/automations/pause/command.ts
+new file mode 100644
+index 000000000..113c6dabd
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/pause/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/pause/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/prompt/get/command.ts b/packages/cli-wrapper/src/commands/automations/prompt/get/command.ts
+new file mode 100644
+index 000000000..4ea099bb5
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/prompt/get/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/prompt/get/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/prompt/set/command.ts b/packages/cli-wrapper/src/commands/automations/prompt/set/command.ts
+new file mode 100644
+index 000000000..d6fbcc0b5
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/prompt/set/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/prompt/set/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/resume/command.ts b/packages/cli-wrapper/src/commands/automations/resume/command.ts
+new file mode 100644
+index 000000000..0a751291a
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/resume/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/resume/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/run/command.ts b/packages/cli-wrapper/src/commands/automations/run/command.ts
+new file mode 100644
+index 000000000..f0e03d1f8
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/run/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/run/command";
+diff --git a/packages/cli-wrapper/src/commands/automations/update/command.ts b/packages/cli-wrapper/src/commands/automations/update/command.ts
+new file mode 100644
+index 000000000..786bb2d43
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/automations/update/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/automations/update/command";
+diff --git a/packages/cli-wrapper/src/commands/hosts/list/command.ts b/packages/cli-wrapper/src/commands/hosts/list/command.ts
+new file mode 100644
+index 000000000..c1fd4bf94
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/hosts/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/hosts/list/command";
+diff --git a/packages/cli-wrapper/src/commands/middleware.ts b/packages/cli-wrapper/src/commands/middleware.ts
+new file mode 100644
+index 000000000..29205f83f
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/middleware.ts
+@@ -0,0 +1,26 @@
++import { middleware } from "@superset/cli-framework";
++import { trackCommandInvoked } from "@superset/cli/src/lib/analytics";
++import { resolveAuth } from "@superset/cli/src/lib/resolve-auth";
++
++export default middleware(async (opts) => {
++	if (opts.commandPath.length > 0 && ["serve", "start"].includes(opts.commandPath[0])) {
++		return opts.next({
++			ctx: { api: null as any, config: null as any, bearer: "", authSource: "none" as any },
++		});
++	}
++
++	const options = opts.options as { apiKey?: string };
++	const { config, api, bearer, authSource } = await resolveAuth(options.apiKey);
++
++	trackCommandInvoked({
++		api,
++		commandPath: opts.commandPath,
++		flags: Object.keys(opts.options).filter(
++			(k) => opts.options[k] !== undefined,
++		),
++	});
++
++	return opts.next({
++		ctx: { api, config, bearer, authSource },
++	});
++});
+diff --git a/packages/cli-wrapper/src/commands/organization/list/command.ts b/packages/cli-wrapper/src/commands/organization/list/command.ts
+new file mode 100644
+index 000000000..853378920
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/organization/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/organization/list/command";
+diff --git a/packages/cli-wrapper/src/commands/organization/members/list/command.ts b/packages/cli-wrapper/src/commands/organization/members/list/command.ts
+new file mode 100644
+index 000000000..c19d4ff05
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/organization/members/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/organization/members/list/command";
+diff --git a/packages/cli-wrapper/src/commands/organization/switch/command.ts b/packages/cli-wrapper/src/commands/organization/switch/command.ts
+new file mode 100644
+index 000000000..bfcdd7ccb
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/organization/switch/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/organization/switch/command";
+diff --git a/packages/cli-wrapper/src/commands/projects/create/command.ts b/packages/cli-wrapper/src/commands/projects/create/command.ts
+new file mode 100644
+index 000000000..428980c39
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/projects/create/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/projects/create/command";
+diff --git a/packages/cli-wrapper/src/commands/projects/list/command.ts b/packages/cli-wrapper/src/commands/projects/list/command.ts
+new file mode 100644
+index 000000000..f56940c3e
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/projects/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/projects/list/command";
+diff --git a/packages/cli-wrapper/src/commands/projects/setup/command.ts b/packages/cli-wrapper/src/commands/projects/setup/command.ts
+new file mode 100644
+index 000000000..f88776127
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/projects/setup/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/projects/setup/command";
+diff --git a/packages/cli-wrapper/src/commands/serve/command.ts b/packages/cli-wrapper/src/commands/serve/command.ts
+new file mode 100644
+index 000000000..def7179b0
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/serve/command.ts
+@@ -0,0 +1,32 @@
++import { createCommand, number, string, boolean } from "@superset/cli-framework";
++import { startServer } from "../../api/server";
++
++export default createCommand()({
++	description: "Start the Superset Cloud API backend",
++	options: {
++		apiPort: number()
++			.desc("Port for the API (matches upstream apps/api)")
++			.default(3001),
++		webPort: number()
++			.desc("Port for the web/integrations shim (matches upstream apps/web)")
++			.default(3000),
++		dbUrl: string().desc("PostgreSQL Database URL").env("DATABASE_URL"),
++		verbose: boolean()
++			.desc("Enable verbose logging (including ElectricSQL shape streams)")
++			.default(false),
++	},
++	run: async ({ options }) => {
++		if (!options.dbUrl) {
++			throw new Error(
++				"Missing required configuration: Database URL must be provided via --db-url or DATABASE_URL environment variable.",
++			);
++		}
++		console.log(`Starting Superset Cloud API on port ${options.apiPort}...`);
++		await startServer({
++			apiPort: options.apiPort,
++			webPort: options.webPort,
++			dbUrl: options.dbUrl,
++			verbose: options.verbose,
++		});
++	},
++});
+diff --git a/packages/cli-wrapper/src/commands/start/command.ts b/packages/cli-wrapper/src/commands/start/command.ts
+new file mode 100644
+index 000000000..80d288b39
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/start/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/start/command";
+diff --git a/packages/cli-wrapper/src/commands/status/command.ts b/packages/cli-wrapper/src/commands/status/command.ts
+new file mode 100644
+index 000000000..2cdc7632c
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/status/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/status/command";
+diff --git a/packages/cli-wrapper/src/commands/stop/command.ts b/packages/cli-wrapper/src/commands/stop/command.ts
+new file mode 100644
+index 000000000..488f0d1e3
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/stop/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/stop/command";
+diff --git a/packages/cli-wrapper/src/commands/tasks/create/command.ts b/packages/cli-wrapper/src/commands/tasks/create/command.ts
+new file mode 100644
+index 000000000..b9869279f
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/tasks/create/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/tasks/create/command";
+diff --git a/packages/cli-wrapper/src/commands/tasks/delete/command.ts b/packages/cli-wrapper/src/commands/tasks/delete/command.ts
+new file mode 100644
+index 000000000..30d270682
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/tasks/delete/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/tasks/delete/command";
+diff --git a/packages/cli-wrapper/src/commands/tasks/get/command.ts b/packages/cli-wrapper/src/commands/tasks/get/command.ts
+new file mode 100644
+index 000000000..f66c21c94
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/tasks/get/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/tasks/get/command";
+diff --git a/packages/cli-wrapper/src/commands/tasks/list/command.ts b/packages/cli-wrapper/src/commands/tasks/list/command.ts
+new file mode 100644
+index 000000000..b62c30566
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/tasks/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/tasks/list/command";
+diff --git a/packages/cli-wrapper/src/commands/tasks/statuses/list/command.ts b/packages/cli-wrapper/src/commands/tasks/statuses/list/command.ts
+new file mode 100644
+index 000000000..24b9030f4
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/tasks/statuses/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/tasks/statuses/list/command";
+diff --git a/packages/cli-wrapper/src/commands/tasks/update/command.ts b/packages/cli-wrapper/src/commands/tasks/update/command.ts
+new file mode 100644
+index 000000000..d6dc50087
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/tasks/update/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/tasks/update/command";
+diff --git a/packages/cli-wrapper/src/commands/terminals/create/command.ts b/packages/cli-wrapper/src/commands/terminals/create/command.ts
+new file mode 100644
+index 000000000..69117afa0
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/terminals/create/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/terminals/create/command";
+diff --git a/packages/cli-wrapper/src/commands/update/command.ts b/packages/cli-wrapper/src/commands/update/command.ts
+new file mode 100644
+index 000000000..85780efa0
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/update/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/update/command";
+diff --git a/packages/cli-wrapper/src/commands/workspaces/create/command.ts b/packages/cli-wrapper/src/commands/workspaces/create/command.ts
+new file mode 100644
+index 000000000..a7f35e44e
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/workspaces/create/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/workspaces/create/command";
+diff --git a/packages/cli-wrapper/src/commands/workspaces/delete/command.ts b/packages/cli-wrapper/src/commands/workspaces/delete/command.ts
+new file mode 100644
+index 000000000..035822925
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/workspaces/delete/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/workspaces/delete/command";
+diff --git a/packages/cli-wrapper/src/commands/workspaces/list/command.ts b/packages/cli-wrapper/src/commands/workspaces/list/command.ts
+new file mode 100644
+index 000000000..beda56e4d
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/workspaces/list/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/workspaces/list/command";
+diff --git a/packages/cli-wrapper/src/commands/workspaces/open/command.ts b/packages/cli-wrapper/src/commands/workspaces/open/command.ts
+new file mode 100644
+index 000000000..bfc842e65
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/workspaces/open/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/workspaces/open/command";
+diff --git a/packages/cli-wrapper/src/commands/workspaces/update/command.ts b/packages/cli-wrapper/src/commands/workspaces/update/command.ts
+new file mode 100644
+index 000000000..549ee7148
+--- /dev/null
++++ b/packages/cli-wrapper/src/commands/workspaces/update/command.ts
+@@ -0,0 +1 @@
++export { default } from "@superset/cli/src/commands/workspaces/update/command";
+-- 
+2.43.0
+

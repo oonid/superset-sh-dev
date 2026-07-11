@@ -1,0 +1,25 @@
+From 27b7dd0f4c70c707b1ba60cfa58d03102ff20dd2 Mon Sep 17 00:00:00 2001
+From: oon arfiandwi <oon.arfiandwi@gmail.com>
+Date: Fri, 3 Jul 2026 21:39:23 +0700
+Subject: [PATCH 6/8] fix(api): proxy tRPC and cloud requests for local dev
+
+---
+ apps/api/src/proxy.ts | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/apps/api/src/proxy.ts b/apps/api/src/proxy.ts
+index 645112395..f21d49418 100644
+--- a/apps/api/src/proxy.ts
++++ b/apps/api/src/proxy.ts
+@@ -17,6 +17,8 @@ function getAllowedOrigins(deploymentOrigin: string) {
+ 		env.NEXT_PUBLIC_WEB_URL,
+ 		env.NEXT_PUBLIC_ADMIN_URL,
+ 		env.NEXT_PUBLIC_DESKTOP_URL,
++		"superset://app",
++		"superset://",
+ 		...getTrustedVercelPreviewOrigins(deploymentOrigin),
+ 		...desktopDevOrigins,
+ 	].filter(Boolean);
+-- 
+2.43.0
+

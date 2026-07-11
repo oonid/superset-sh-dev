@@ -1,0 +1,647 @@
+From b5a3b44d7f32fb87712ae43f3c3f5f6c36344d75 Mon Sep 17 00:00:00 2001
+From: oon arfiandwi <oon.arfiandwi@gmail.com>
+Date: Fri, 3 Jul 2026 21:38:54 +0700
+Subject: [PATCH 2/8] chore(docker): add linux build and dev scripts
+
+---
+ docker/Dockerfile.linux-build |  24 +++++
+ docker/Dockerfile.linux-dev   |  57 ++++++++++++
+ docker/api.sh                 |  77 ++++++++++++++++
+ docker/build-linux-dev.sh     |  81 +++++++++++++++++
+ docker/build-linux.sh         |  77 ++++++++++++++++
+ docker/dev-api.sh             |  45 +++++++++
+ docker/dev-web.sh             |  45 +++++++++
+ docker/dev.sh                 | 166 ++++++++++++++++++++++++++++++++++
+ 8 files changed, 572 insertions(+)
+ create mode 100644 docker/Dockerfile.linux-build
+ create mode 100644 docker/Dockerfile.linux-dev
+ create mode 100755 docker/api.sh
+ create mode 100755 docker/build-linux-dev.sh
+ create mode 100755 docker/build-linux.sh
+ create mode 100755 docker/dev-api.sh
+ create mode 100755 docker/dev-web.sh
+ create mode 100755 docker/dev.sh
+
+diff --git a/docker/Dockerfile.linux-build b/docker/Dockerfile.linux-build
+new file mode 100644
+index 000000000..1a7471ade
+--- /dev/null
++++ b/docker/Dockerfile.linux-build
+@@ -0,0 +1,24 @@
++FROM mcr.microsoft.com/devcontainers/javascript-node:20
++
++# Install system deps required by Electron builds and .deb packaging
++RUN apt-get update && apt-get install -y \
++    # Build tools
++    python3 \
++    make \
++    g++ \
++    # Electron build deps
++    libx11-dev \
++    libxkbfile-dev \
++    libsecret-1-dev \
++    # .deb / AppImage packaging
++    rpm \
++    fakeroot \
++    dpkg-dev \
++    && rm -rf /var/lib/apt/lists/*
++
++# Install Bun 1.3.11 via npm (matches .bun-version, no curl/internet required)
++RUN npm install -g bun@1.3.11
++
++WORKDIR /workspace
++
++CMD ["bash"]
+diff --git a/docker/Dockerfile.linux-dev b/docker/Dockerfile.linux-dev
+new file mode 100644
+index 000000000..1bd073703
+--- /dev/null
++++ b/docker/Dockerfile.linux-dev
+@@ -0,0 +1,57 @@
++FROM mcr.microsoft.com/devcontainers/javascript-node:20
++
++# Install system deps for Electron builds and Chromium runtime
++# Package names are for Debian Trixie (13) — some were renamed from Bookworm.
++RUN apt-get update && apt-get install -y \
++    # Build tools
++    python3 \
++    make \
++    g++ \
++    # Electron build deps (native module compilation)
++    libx11-dev \
++    libxkbfile-dev \
++    libsecret-1-dev \
++    # Electron/Chromium runtime deps (Trixie-specific names)
++    libgtk-3-0 \
++    libgdk-pixbuf-2.0-0 \
++    libnss3 \
++    libnspr4 \
++    libatk1.0-0t64 \
++    libatk-bridge2.0-0t64 \
++    libcups2t64 \
++    libxss1 \
++    libxcomposite1 \
++    libxrandr2 \
++    libxdamage1 \
++    libxfixes3 \
++    libxext6 \
++    libx11-xcb1 \
++    libxcb1 \
++    libxcb-dri3-0 \
++    libxkbcommon0 \
++    libpango-1.0-0 \
++    libcairo2 \
++    libasound2t64 \
++    libgbm1 \
++    libdrm2 \
++    libexpat1 \
++    libdbus-1-3 \
++    libxi6 \
++    libxtst6 \
++    libxrender1 \
++    libxcursor1 \
++    # D-Bus session (Electron uses it for notifications / tray)
++    dbus \
++    dbus-x11 \
++    # Packaging tools
++    rpm \
++    fakeroot \
++    dpkg-dev \
++    && rm -rf /var/lib/apt/lists/*
++
++# Install Bun 1.3.11 via npm (no curl/download script needed)
++RUN npm install -g bun@1.3.11
++
++WORKDIR /workspace
++
++CMD ["bash"]
+diff --git a/docker/api.sh b/docker/api.sh
+new file mode 100755
+index 000000000..6ba8e086b
+--- /dev/null
++++ b/docker/api.sh
+@@ -0,0 +1,77 @@
++#!/usr/bin/env bash
++# Start the Superset API (apps/api — Next.js) inside Docker.
++#
++# Usage:
++#   ./docker/api.sh              # start API dev server
++#   ./docker/api.sh --reinstall  # force bun install even if lockfile unchanged
++#
++# The API runs at http://localhost:3001
++# Env vars are read from the root .env file.
++
++set -euo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
++IMAGE_NAME="superset-linux-dev"
++FORCE_REINSTALL=false
++
++for arg in "$@"; do
++  case "$arg" in
++    --reinstall) FORCE_REINSTALL=true ;;
++  esac
++done
++
++if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
++  echo ">>> Docker image $IMAGE_NAME not found. Run ./docker/dev.sh first to build it."
++  exit 1
++fi
++
++if [ ! -f "$REPO_ROOT/.env" ]; then
++  echo ">>> .env not found. Run: cp .env.local.example .env"
++  exit 1
++fi
++
++echo ">>> Starting Superset API at http://localhost:3001 ..."
++echo ""
++
++DOCKER_ARGS=(
++  --rm -i
++  --network host
++  --name superset-api
++  -v "$REPO_ROOT:/workspace"
++  -v "superset-dev-root-nm:/workspace/node_modules"
++  -v "superset-api-nm:/workspace/apps/api/.next"
++  --env-file "$REPO_ROOT/.env"
++  -e FORCE_REINSTALL="$FORCE_REINSTALL"
++  -e NEXT_TELEMETRY_DISABLED=1
++)
++
++[[ -t 0 ]] && DOCKER_ARGS+=(-t)
++
++docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME" bash -c '
++  set -e
++  cd /workspace
++
++  # Skip bun install if lockfile unchanged
++  LOCKFILE=/workspace/bun.lockb
++  STAMP=/workspace/node_modules/.bun-install-stamp
++  LOCKFILE_HASH=$(sha256sum "$LOCKFILE" 2>/dev/null | cut -d" " -f1 || echo "none")
++
++  if [ "$FORCE_REINSTALL" = "true" ]; then
++    echo "--- Installing monorepo dependencies (forced) ---"
++    bun install --frozen
++    echo "$LOCKFILE_HASH" > "$STAMP"
++  elif [ -f "$STAMP" ] && [ "$(cat $STAMP 2>/dev/null)" = "$LOCKFILE_HASH" ] && [ -d node_modules ]; then
++    echo "--- Dependencies up to date, skipping bun install ---"
++  else
++    echo "--- Installing monorepo dependencies ---"
++    bun install --frozen
++    echo "$LOCKFILE_HASH" > "$STAMP"
++  fi
++
++  echo "--- Starting API dev server at http://localhost:3001 ---"
++  echo "    Ctrl+C to stop."
++  echo ""
++  cd apps/api
++  exec bun run dev 2>&1
++'
+diff --git a/docker/build-linux-dev.sh b/docker/build-linux-dev.sh
+new file mode 100755
+index 000000000..98f0220f1
+--- /dev/null
++++ b/docker/build-linux-dev.sh
+@@ -0,0 +1,81 @@
++#!/usr/bin/env bash
++# Build Superset as a Linux .deb (and AppImage) using Docker.
++# Nothing is installed on the host — all build tools run inside the container.
++# Output lands at: apps/desktop/release/
++#
++# Usage:
++#   ./docker/build-linux.sh          # build .deb + AppImage
++#   ./docker/build-linux.sh --rebuild-image  # force rebuild the Docker image first
++#
++# Caches (persist across builds for speed):
++#   superset-root-node-modules       root monorepo node_modules
++#   superset-desktop-node-modules    apps/desktop node_modules
++#   superset-electron-cache          downloaded Electron binaries
++#   superset-electron-builder-cache  electron-builder cache
++#   superset-bun-cache               Bun package cache
++
++set -euo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
++IMAGE_NAME="superset-linux-builder"
++OUTPUT_DIR="$REPO_ROOT/apps/desktop/release"
++REBUILD_IMAGE=false
++
++for arg in "$@"; do
++  case "$arg" in
++    --rebuild-image) REBUILD_IMAGE=true ;;
++  esac
++done
++
++# Build (or reuse) the Docker build image
++if $REBUILD_IMAGE || ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
++  echo ">>> Building Docker image ($IMAGE_NAME)..."
++  docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile.linux-build" "$SCRIPT_DIR"
++else
++  echo ">>> Reusing existing Docker image ($IMAGE_NAME). Pass --rebuild-image to refresh."
++fi
++
++echo ">>> Building Superset for Linux..."
++docker run --rm \
++  -v "$REPO_ROOT:/workspace" \
++  -v "superset-root-node-modules:/workspace/node_modules" \
++  -v "superset-desktop-node-modules:/workspace/apps/desktop/node_modules" \
++  -v "superset-bun-cache:/root/.bun/install/cache" \
++  -v "superset-electron-cache:/root/.cache/electron" \
++  -v "superset-electron-builder-cache:/root/.cache/electron-builder" \
++  -e NODE_ENV=production \
++  -e NEXT_PUBLIC_API_URL=http://localhost:3001 \
++  -e NEXT_PUBLIC_WEB_URL=http://localhost:3000 \
++  -e NEXT_PUBLIC_MARKETING_URL=http://localhost:3002 \
++  -e NEXT_PUBLIC_ELECTRIC_URL=http://localhost:8787 \
++  -e RELAY_URL=http://localhost:4734 \
++  "$IMAGE_NAME" \
++  bash -c "
++    set -e
++    cd /workspace
++
++    echo '--- Installing monorepo dependencies ---'
++    bun install --frozen --ignore-scripts
++
++    cd apps/desktop
++
++    echo '--- Installing Electron native deps ---'
++    bun run install:deps
++
++    echo '--- Cleaning dev artifacts ---'
++    bun run clean:dev
++
++    echo '--- Generating icons ---'
++    bun run generate:icons
++
++    echo '--- Compiling app (electron-vite) ---'
++    bun run compile:app
++
++    echo '--- Packaging (electron-builder) ---'
++    bun run package -- --publish never --linux deb -c.productName=superset-dev -c.appId=sh.superset.dev.desktop -c.linux.artifactName='superset-dev-\${version}-\${arch}.\${ext}'
++  "
++
++echo ""
++echo "Build complete. Output in $OUTPUT_DIR:"
++ls -lh "$OUTPUT_DIR" 2>/dev/null || echo "(empty — build may have failed)"
+diff --git a/docker/build-linux.sh b/docker/build-linux.sh
+new file mode 100755
+index 000000000..1f610e14c
+--- /dev/null
++++ b/docker/build-linux.sh
+@@ -0,0 +1,77 @@
++#!/usr/bin/env bash
++# Build Superset as a Linux .deb (and AppImage) using Docker.
++# Nothing is installed on the host — all build tools run inside the container.
++# Output lands at: apps/desktop/release/
++#
++# Usage:
++#   ./docker/build-linux.sh          # build .deb + AppImage
++#   ./docker/build-linux.sh --rebuild-image  # force rebuild the Docker image first
++#
++# Caches (persist across builds for speed):
++#   superset-root-node-modules       root monorepo node_modules
++#   superset-desktop-node-modules    apps/desktop node_modules
++#   superset-electron-cache          downloaded Electron binaries
++#   superset-electron-builder-cache  electron-builder cache
++#   superset-bun-cache               Bun package cache
++
++set -euo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
++IMAGE_NAME="superset-linux-builder"
++OUTPUT_DIR="$REPO_ROOT/apps/desktop/release"
++REBUILD_IMAGE=false
++
++for arg in "$@"; do
++  case "$arg" in
++    --rebuild-image) REBUILD_IMAGE=true ;;
++  esac
++done
++
++# Build (or reuse) the Docker build image
++if $REBUILD_IMAGE || ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
++  echo ">>> Building Docker image ($IMAGE_NAME)..."
++  docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile.linux-build" "$SCRIPT_DIR"
++else
++  echo ">>> Reusing existing Docker image ($IMAGE_NAME). Pass --rebuild-image to refresh."
++fi
++
++echo ">>> Building Superset for Linux..."
++docker run --rm \
++  -v "$REPO_ROOT:/workspace" \
++  -v "/home/o/agents/superset-dev:/workspace-dev" \
++  -e NODE_ENV=production \
++  -e NEXT_PUBLIC_API_URL=https://api.superset.sh \
++  -e NEXT_PUBLIC_WEB_URL=https://app.superset.sh \
++  -e NEXT_PUBLIC_MARKETING_URL=https://superset.sh \
++  -e NEXT_PUBLIC_ELECTRIC_URL=https://electric-proxy.avi-6ac.workers.dev \
++  -e RELAY_URL=https://relay.superset.sh \
++  "$IMAGE_NAME" \
++  bash -c "
++    set -e
++    cd /workspace
++
++    echo '--- Monorepo dependencies already installed on host ---'
++
++    cd apps/desktop
++
++    echo '--- Installing Electron native deps ---'
++    bun run install:deps
++
++    echo '--- Cleaning dev artifacts ---'
++    bun run clean:dev
++
++    echo '--- Generating icons ---'
++    bun run generate:icons
++
++    echo '--- Compiling app (electron-vite) ---'
++    bun run compile:app
++
++
++    echo '--- Packaging (electron-builder) ---'
++    bun run package -- --publish never
++  "
++
++echo ""
++echo "Build complete. Output in $OUTPUT_DIR:"
++ls -lh "$OUTPUT_DIR" 2>/dev/null || echo "(empty — build may have failed)"
+diff --git a/docker/dev-api.sh b/docker/dev-api.sh
+new file mode 100755
+index 000000000..d9a45cd7a
+--- /dev/null
++++ b/docker/dev-api.sh
+@@ -0,0 +1,45 @@
++#!/usr/bin/env bash
++# Start Superset API in dev mode inside Docker
++
++set -euo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
++IMAGE_NAME="superset-linux-dev"
++
++if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
++  echo "Error: Image $IMAGE_NAME not found. Run ./docker/dev.sh first to build it."
++  exit 1
++fi
++
++DOCKER_ARGS=(
++  --rm -i
++  --network host
++  -v "$REPO_ROOT:/workspace"
++  -v "superset-dev-root-nm:/workspace/node_modules"
++  -v "superset-bun-cache:/root/.bun/install/cache"
++)
++
++[[ -t 0 ]] && DOCKER_ARGS+=(-t)
++
++echo ">>> Starting Superset API dev server..."
++docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME" bash -c '
++  set -e
++  cd /workspace
++  
++  # --- bun install: skip if lockfile unchanged ---
++  LOCKFILE=/workspace/bun.lockb
++  STAMP=/workspace/node_modules/.bun-install-stamp
++  LOCKFILE_HASH=$(sha256sum "$LOCKFILE" 2>/dev/null | cut -d" " -f1 || echo "none")
++
++  if [ -f "$STAMP" ] && [ "$(cat $STAMP 2>/dev/null)" = "$LOCKFILE_HASH" ] && [ -d node_modules ]; then
++    echo "--- Dependencies up to date, skipping bun install ---"
++  else
++    echo "--- Installing monorepo dependencies (verbose mode) ---"
++    bun install --frozen --verbose
++    echo "$LOCKFILE_HASH" > "$STAMP"
++  fi
++  
++  echo "--- Starting API Server and Electric Proxy ---"
++  bun --filter @superset/api --filter electric-proxy dev
++'
+diff --git a/docker/dev-web.sh b/docker/dev-web.sh
+new file mode 100755
+index 000000000..7614dd0d0
+--- /dev/null
++++ b/docker/dev-web.sh
+@@ -0,0 +1,45 @@
++#!/usr/bin/env bash
++# Start Superset API in dev mode inside Docker
++
++set -euo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
++IMAGE_NAME="superset-linux-dev"
++
++if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
++  echo "Error: Image $IMAGE_NAME not found. Run ./docker/dev.sh first to build it."
++  exit 1
++fi
++
++DOCKER_ARGS=(
++  --rm -i
++  --network host
++  -v "$REPO_ROOT:/workspace"
++  -v "superset-dev-root-nm:/workspace/node_modules"
++  -v "superset-bun-cache:/root/.bun/install/cache"
++)
++
++[[ -t 0 ]] && DOCKER_ARGS+=(-t)
++
++echo ">>> Starting Superset Web dev server..."
++docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME" bash -c '
++  set -e
++  cd /workspace
++  
++  # --- bun install: skip if lockfile unchanged ---
++  LOCKFILE=/workspace/bun.lockb
++  STAMP=/workspace/node_modules/.bun-install-stamp
++  LOCKFILE_HASH=$(sha256sum "$LOCKFILE" 2>/dev/null | cut -d" " -f1 || echo "none")
++
++  if [ -f "$STAMP" ] && [ "$(cat $STAMP 2>/dev/null)" = "$LOCKFILE_HASH" ] && [ -d node_modules ]; then
++    echo "--- Dependencies up to date, skipping bun install ---"
++  else
++    echo "--- Installing monorepo dependencies (verbose mode) ---"
++    bun install --frozen --verbose
++    echo "$LOCKFILE_HASH" > "$STAMP"
++  fi
++  
++  echo "--- Starting API Server and Electric Proxy ---"
++  bun --filter @superset/web --filter electric-proxy dev
++'
+diff --git a/docker/dev.sh b/docker/dev.sh
+new file mode 100755
+index 000000000..183c56a71
+--- /dev/null
++++ b/docker/dev.sh
+@@ -0,0 +1,166 @@
++#!/usr/bin/env bash
++# Start Superset in dev mode (Electron + Vite hot-reload) inside Docker,
++# forwarding the Electron window to the host X11 display.
++#
++# Usage:
++#   ./docker/dev.sh                  # start dev (builds image if needed)
++#   ./docker/dev.sh --rebuild-image  # force rebuild the Docker image first
++#   ./docker/dev.sh --reinstall      # force bun install even if lockfile unchanged
++#
++# Prerequisites on the host:
++#   - Docker running
++#   - An X11 display (DISPLAY is set) — works with X11 or XWayland
++#
++# Node_modules are isolated in Docker named volumes so the Linux-ABI native
++# modules never conflict with anything on your host.
++#
++# Subsequent runs are fast (~30s) because:
++#   - bun install is skipped when bun.lockb hasn't changed (stamp check)
++#   - Electron native deps are skipped when Electron version hasn't changed
++#   - Packages and Electron binary are cached in named Docker volumes
++
++set -euo pipefail
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
++IMAGE_NAME="superset-linux-dev"
++REBUILD_IMAGE=false
++FORCE_REINSTALL=false
++
++for arg in "$@"; do
++  case "$arg" in
++    --rebuild-image) REBUILD_IMAGE=true ;;
++    --reinstall) FORCE_REINSTALL=true ;;
++  esac
++done
++
++# Verify there's a display to forward to
++if [ -z "${DISPLAY:-}" ]; then
++  echo "Error: \$DISPLAY is not set. An X11 display is required."
++  echo "If you're on Wayland, XWayland should provide :0 automatically."
++  exit 1
++fi
++
++# Build the dev image if it doesn't exist yet or --rebuild-image was passed
++if $REBUILD_IMAGE || ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
++  echo ">>> Building Docker dev image ($IMAGE_NAME)..."
++  docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile.linux-dev" "$SCRIPT_DIR"
++else
++  echo ">>> Reusing existing Docker dev image. Pass --rebuild-image to refresh."
++fi
++
++# Allow the Docker container to connect to the host X11 server
++xhost +local:docker 2>/dev/null || echo "Note: xhost not found — X11 auth may need manual setup."
++
++# Build docker run args array
++DOCKER_ARGS=(
++  --rm -i
++  # Networking: share host stack so localhost resolves to the same postgres/electric
++  # ports that docker-compose starts, and so X11 socket access works cleanly
++  --network host
++  # Chrome sandbox needs user namespace support; SYS_ADMIN enables CLONE_NEWUSER
++  --cap-add=SYS_ADMIN
++  # Increase /dev/shm for Chromium (default Docker limit is 64 MB, too small)
++  --shm-size=256m
++  # X11 display forwarding
++  -e DISPLAY="$DISPLAY"
++  -v /tmp/.X11-unix:/tmp/.X11-unix
++  # Source code (bind mount — your edits are visible inside immediately)
++  -v "$REPO_ROOT:/workspace"
++  # Isolate node_modules in named volumes (Linux-ABI compatible, not host's)
++  -v "superset-dev-root-nm:/workspace/node_modules"
++  -v "superset-dev-desktop-nm:/workspace/apps/desktop/node_modules"
++  # Shared caches across dev and build containers
++  -v "superset-bun-cache:/root/.bun/install/cache"
++  -v "superset-electron-cache:/root/.cache/electron"
++  # Env vars for the Electron app
++  -e ELECTRON_NO_SANDBOX=1
++  -e SUPERSET_WORKSPACE_NAME=dev
++  -e NODE_ENV=development
++  # Port defaults (electron.vite.config.ts reads these before Zod; must be explicit)
++  -e DESKTOP_VITE_PORT=5173
++  -e DESKTOP_NOTIFICATIONS_PORT=51741
++  -e ELECTRIC_PORT=3100
++  # Pass reinstall flag into the container
++  -e FORCE_REINSTALL="$FORCE_REINSTALL"
++)
++
++# Mount Xauthority cookie if present (more secure X11 auth than xhost)
++if [ -f "${XAUTHORITY:-$HOME/.Xauthority}" ]; then
++  DOCKER_ARGS+=(
++    -v "${XAUTHORITY:-$HOME/.Xauthority}:/root/.Xauthority:ro"
++    -e XAUTHORITY=/root/.Xauthority
++  )
++fi
++
++# Allocate a TTY only when running in an interactive terminal (allows Ctrl+C)
++[[ -t 0 ]] && DOCKER_ARGS+=(-t)
++
++echo ">>> Starting Superset dev environment (display: $DISPLAY)..."
++echo "    Source: $REPO_ROOT"
++echo ""
++
++docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME" bash -c '
++  set -e
++  cd /workspace
++
++  # --- bun install: skip if lockfile unchanged (saves ~12 min on re-runs) ---
++  LOCKFILE=/workspace/bun.lockb
++  STAMP=/workspace/node_modules/.bun-install-stamp
++  LOCKFILE_HASH=$(sha256sum "$LOCKFILE" 2>/dev/null | cut -d" " -f1 || echo "none")
++
++  if [ "$FORCE_REINSTALL" = "true" ]; then
++    echo "--- Installing monorepo dependencies (forced) ---"
++    bun install --frozen
++    echo "$LOCKFILE_HASH" > "$STAMP"
++  elif [ -f "$STAMP" ] && [ "$(cat $STAMP 2>/dev/null)" = "$LOCKFILE_HASH" ] && [ -d node_modules ]; then
++    echo "--- Dependencies up to date, skipping bun install (lockfile unchanged) ---"
++    echo "    Pass --reinstall to force a fresh install."
++  else
++    echo "--- Installing monorepo dependencies ---"
++    bun install --frozen
++    echo "$LOCKFILE_HASH" > "$STAMP"
++  fi
++
++  # --- Electron binary ---
++  cd apps/desktop
++  ELECTRON_INSTALL_JS=$(node -p "require.resolve('\''electron/install.js'\'')" 2>/dev/null)
++  ELECTRON_DIR=$(dirname "$ELECTRON_INSTALL_JS")
++  if [ ! -f "$ELECTRON_DIR/path.txt" ]; then
++    echo "--- Downloading Electron binary (~120 MB, one-time only) ---"
++    node "$ELECTRON_INSTALL_JS"
++  fi
++
++  # --- native deps: skip if Electron version unchanged ---
++  ELECTRON_VERSION=$(node -p "require('\''./node_modules/electron/package.json'\'').version" 2>/dev/null || echo "unknown")
++  NATIVE_STAMP=./node_modules/.electron-native-stamp
++
++  if [ "$FORCE_REINSTALL" = "true" ]; then
++    echo "--- Installing Electron native deps (forced) ---"
++    bun run install:deps
++    echo "$ELECTRON_VERSION" > "$NATIVE_STAMP"
++  elif [ -f "$NATIVE_STAMP" ] && [ "$(cat $NATIVE_STAMP 2>/dev/null)" = "$ELECTRON_VERSION" ]; then
++    echo "--- Native deps up to date for Electron $ELECTRON_VERSION ---"
++  else
++    echo "--- Installing Electron native deps (Electron $ELECTRON_VERSION) ---"
++    bun run install:deps
++    echo "$ELECTRON_VERSION" > "$NATIVE_STAMP"
++  fi
++
++  echo "--- Starting D-Bus session ---"
++  eval $(dbus-launch --sh-syntax) || true
++
++  echo "--- Launching Superset dev (Electron + Vite hot-reload) ---"
++  echo "    The Electron window will open on your host display."
++  echo "    Close the window and Ctrl+C to stop. Re-run ./docker/dev.sh to relaunch."
++  echo ""
++  # Run predev steps manually so we can pass --no-sandbox to Electron via --.
++  # (bun run dev triggers predev automatically but gives no way to append
++  # Electron flags; macOS-specific scripts are no-ops on Linux.)
++  NODE_ENV=development bun run clean:dev
++  bun run generate:icons
++  bun run bundle:cli
++  # Launch: -- passes everything after it directly to the Electron binary
++  NODE_ENV=development NODE_OPTIONS=--max-old-space-size=8192 \
++    ./node_modules/.bin/electron-vite dev --watch -- --no-sandbox
++'
+-- 
+2.43.0
+

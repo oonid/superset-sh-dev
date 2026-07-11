@@ -1,0 +1,1910 @@
+From dac4fdd3f22be606be0eb40a7ac1afb8b14de2ad Mon Sep 17 00:00:00 2001
+From: oon arfiandwi <oon.arfiandwi@gmail.com>
+Date: Fri, 3 Jul 2026 21:39:12 +0700
+Subject: [PATCH 4/8] feat(cli-wrapper): implement mock API server
+
+---
+ packages/cli-wrapper/src/api/auth.ts        | 251 ++++++++++
+ packages/cli-wrapper/src/api/chat.ts        |  56 +++
+ packages/cli-wrapper/src/api/electric.ts    | 216 +++++++++
+ packages/cli-wrapper/src/api/github.ts      | 112 +++++
+ packages/cli-wrapper/src/api/jwt.test.ts    |  21 +
+ packages/cli-wrapper/src/api/jwt.ts         |  55 +++
+ packages/cli-wrapper/src/api/octokit.ts     |  48 ++
+ packages/cli-wrapper/src/api/server.test.ts | 113 +++++
+ packages/cli-wrapper/src/api/server.ts      | 156 +++++++
+ packages/cli-wrapper/src/api/trpc.test.ts   |  67 +++
+ packages/cli-wrapper/src/api/trpc.ts        | 492 ++++++++++++++++++++
+ packages/cli-wrapper/src/api/version.ts     | 169 +++++++
+ packages/cli-wrapper/src/api/web.ts         |  39 ++
+ 13 files changed, 1795 insertions(+)
+ create mode 100644 packages/cli-wrapper/src/api/auth.ts
+ create mode 100644 packages/cli-wrapper/src/api/chat.ts
+ create mode 100644 packages/cli-wrapper/src/api/electric.ts
+ create mode 100644 packages/cli-wrapper/src/api/github.ts
+ create mode 100644 packages/cli-wrapper/src/api/jwt.test.ts
+ create mode 100644 packages/cli-wrapper/src/api/jwt.ts
+ create mode 100644 packages/cli-wrapper/src/api/octokit.ts
+ create mode 100644 packages/cli-wrapper/src/api/server.test.ts
+ create mode 100644 packages/cli-wrapper/src/api/server.ts
+ create mode 100644 packages/cli-wrapper/src/api/trpc.test.ts
+ create mode 100644 packages/cli-wrapper/src/api/trpc.ts
+ create mode 100644 packages/cli-wrapper/src/api/version.ts
+ create mode 100644 packages/cli-wrapper/src/api/web.ts
+
+diff --git a/packages/cli-wrapper/src/api/auth.ts b/packages/cli-wrapper/src/api/auth.ts
+new file mode 100644
+index 000000000..dd4647c8f
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/auth.ts
+@@ -0,0 +1,251 @@
++import { db } from "@superset/db/client";
++import {
++	invitations,
++	members,
++	organizations,
++	sessions,
++	teams,
++	users,
++} from "@superset/db/schema/auth";
++import { eq } from "drizzle-orm";
++import { Hono } from "hono";
++import { v4 as uuidv4 } from "uuid";
++import { signSessionJwt } from "./jwt";
++
++export const authRouter = new Hono();
++
++// Resolve the authenticated session + user from a Bearer session token.
++// Returns null when the header is missing or the token/user no longer exists.
++async function resolveSession(authHeader: string | undefined) {
++	const token = authHeader?.replace("Bearer ", "");
++	if (!token) {
++		return null;
++	}
++
++	const session = await db.query.sessions.findFirst({
++		where: eq(sessions.token, token),
++	});
++	if (!session) {
++		return null;
++	}
++
++	const user = await db.query.users.findFirst({
++		where: eq(users.id, session.userId),
++	});
++	if (!user) {
++		return null;
++	}
++
++	return { session, user };
++}
++
++// POST /api/auth/sign-in/email
++authRouter.post("/sign-in/email", async (c) => {
++	const body = await c.req.json();
++	const email = body.email;
++
++	// Fetch the user from the real DB
++	const user = await db.query.users.findFirst({
++		where: eq(users.email, email),
++	});
++
++	if (!user) {
++		return c.json({ error: "INVALID_EMAIL_OR_PASSWORD" }, 400);
++	}
++
++	// Since this is local dev companion app, skip password check and just create a session
++	const token = uuidv4();
++	const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
++
++	const activeOrganizationId = user.organizationIds?.[0] ?? null;
++
++	const [session] = await db
++		.insert(sessions)
++		.values({
++			expiresAt,
++			token,
++			userId: user.id,
++			activeOrganizationId,
++			updatedAt: new Date(),
++		})
++		.returning();
++
++	return c.json({
++		token,
++		user,
++		session,
++	});
++});
++
++// POST /api/auth/sign-up/email
++authRouter.post("/sign-up/email", async (c) => {
++	const body = await c.req.json();
++	const email = body.email;
++
++	const existing = await db.query.users.findFirst({
++		where: eq(users.email, email),
++	});
++
++	if (existing) {
++		return c.json({ error: "USER_ALREADY_EXISTS" }, 400);
++	}
++
++	const userName = email.split("@")[0] || "Local Admin";
++
++	const [user] = await db
++		.insert(users)
++		.values({
++			name: userName,
++			email,
++			emailVerified: true,
++			createdAt: new Date(),
++			updatedAt: new Date(),
++		})
++		.returning();
++
++	const token = uuidv4();
++	const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
++
++	const [session] = await db
++		.insert(sessions)
++		.values({
++			expiresAt,
++			token,
++			userId: user.id,
++			updatedAt: new Date(),
++		})
++		.returning();
++
++	return c.json({
++		token,
++		user,
++		session,
++	});
++});
++
++// GET /api/auth/get-session
++authRouter.get("/get-session", async (c) => {
++	const result = await resolveSession(c.req.header("authorization"));
++	if (!result) {
++		return c.json({ message: "Unauthorized" }, 401);
++	}
++
++	return c.json({
++		session: result.session,
++		user: result.user,
++	});
++});
++
++// POST /api/auth/sign-out
++authRouter.post("/sign-out", async (c) => {
++	const result = await resolveSession(c.req.header("authorization"));
++	if (result) {
++		await db.delete(sessions).where(eq(sessions.token, result.session.token));
++	}
++	return c.json({ success: true });
++});
++
++// GET /api/auth/token
++// Mirrors the better-auth `jwt()` plugin: exchange the current session for a
++// short-lived JWT (used by the SDK / host-service / relay paths). Only Bearer
++// session tokens are accepted locally (the cloud apiKey `x-api-key` flow is not
++// ported into the local companion).
++authRouter.get("/token", async (c) => {
++	const result = await resolveSession(c.req.header("authorization"));
++	if (!result) {
++		return c.json({ message: "Unauthorized" }, 401);
++	}
++
++	const token = signSessionJwt({
++		id: result.user.id,
++		email: result.user.email,
++		organizationIds: result.user.organizationIds ?? [],
++	});
++
++	// Provide token in both body and header to satisfy the client interceptor
++	c.header("set-auth-jwt", token);
++	return c.json({ token, jwt: token });
++});
++
++// Alias for better-auth default jwt endpoint
++authRouter.get("/jwt", async (c) => {
++	const result = await resolveSession(c.req.header("authorization"));
++	if (!result) {
++		return c.json({ message: "Unauthorized" }, 401);
++	}
++
++	const token = signSessionJwt({
++		id: result.user.id,
++		email: result.user.email,
++		organizationIds: result.user.organizationIds ?? [],
++	});
++
++	c.header("set-auth-jwt", token);
++	return c.json({ token, jwt: token });
++});
++
++// GET /api/auth/organization/get-full-organization
++// Mirrors the better-auth organization plugin: return the active organization
++// (or `?organizationId=`) with its members (incl. user), teams, and invitations.
++authRouter.get("/organization/get-full-organization", async (c) => {
++	const result = await resolveSession(c.req.header("authorization"));
++	if (!result) {
++		return c.json({ message: "Unauthorized" }, 401);
++	}
++
++	const organizationId =
++		c.req.query("organizationId") ?? result.session.activeOrganizationId;
++	if (!organizationId) {
++		return c.json(null);
++	}
++
++	const organization = await db.query.organizations.findFirst({
++		where: eq(organizations.id, organizationId),
++	});
++	if (!organization) {
++		return c.json(null);
++	}
++
++	const memberRows = await db
++		.select({
++			id: members.id,
++			organizationId: members.organizationId,
++			userId: members.userId,
++			role: members.role,
++			createdAt: members.createdAt,
++			userName: users.name,
++			userEmail: users.email,
++			userImage: users.image,
++		})
++		.from(members)
++		.innerJoin(users, eq(members.userId, users.id))
++		.where(eq(members.organizationId, organizationId));
++
++	const [orgTeams, orgInvitations] = await Promise.all([
++		db.query.teams.findMany({
++			where: eq(teams.organizationId, organizationId),
++		}),
++		db.query.invitations.findMany({
++			where: eq(invitations.organizationId, organizationId),
++		}),
++	]);
++
++	return c.json({
++		...organization,
++		members: memberRows.map((m) => ({
++			id: m.id,
++			organizationId: m.organizationId,
++			userId: m.userId,
++			role: m.role,
++			createdAt: m.createdAt,
++			user: {
++				id: m.userId,
++				name: m.userName,
++				email: m.userEmail,
++				image: m.userImage,
++			},
++		})),
++		teams: orgTeams,
++		invitations: orgInvitations,
++	});
++});
+diff --git a/packages/cli-wrapper/src/api/chat.ts b/packages/cli-wrapper/src/api/chat.ts
+new file mode 100644
+index 000000000..9083f8ce4
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/chat.ts
+@@ -0,0 +1,56 @@
++import { Hono } from "hono";
++import { db } from "@superset/db/client";
++import { chatSessions } from "@superset/db/schema";
++import { sessions, users } from "@superset/db/schema/auth";
++import { eq } from "drizzle-orm";
++
++export const chatRouter = new Hono();
++
++// PUT /api/chat/:sessionId
++chatRouter.put("/:sessionId", async (c) => {
++	const sessionId = c.req.param("sessionId");
++	const body = await c.req.json();
++	const { organization_id, workspace_id } = body;
++
++	console.log(`Received PUT /api/chat/${sessionId} with org ${organization_id} workspace ${workspace_id}`);
++
++	const authHeader = c.req.header("authorization");
++	const token = authHeader?.replace("Bearer ", "");
++
++	let userId = "00000000-0000-0000-0000-000000000000";
++
++	if (token) {
++		const session = await db.query.sessions.findFirst({
++			where: eq(sessions.token, token),
++		});
++
++		if (session) {
++			const user = await db.query.users.findFirst({
++				where: eq(users.id, session.userId),
++			});
++
++			if (user) {
++				userId = user.id;
++			}
++		}
++	}
++
++	try {
++		await db.insert(chatSessions)
++			.values({
++				id: sessionId,
++				organizationId: organization_id,
++				createdBy: userId,
++				v2WorkspaceId: workspace_id,
++				createdAt: new Date(),
++				updatedAt: new Date(),
++			})
++			.onConflictDoNothing();
++
++		console.log(`Successfully created chat session ${sessionId}`);
++		return c.text("Session created", 200);
++	} catch (e) {
++		console.error("Failed to create chat session:", e);
++		return c.text("Failed to create session", 500);
++	}
++});
+diff --git a/packages/cli-wrapper/src/api/electric.ts b/packages/cli-wrapper/src/api/electric.ts
+new file mode 100644
+index 000000000..90131dea7
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/electric.ts
+@@ -0,0 +1,216 @@
++import { Hono } from "hono";
++import { db } from "@superset/db/client";
++import { v2Workspaces, v2Projects, organizations } from "@superset/db/schema";
++import * as schemas from "@superset/db/schema";
++
++export const electricRouter = new Hono();
++import { IS_VERBOSE } from "./server";
++
++const previousState: Record<string, any[]> = {};
++
++// Queue for forcefully sending delete messages for rows that the UI thinks exist
++// but are actually missing from the Postgres database (phantom rows).
++export const pendingPhantomDeletes: { table: string, id: string }[] = [];
++
++electricRouter.get("/shape", async (c) => {
++	const table = c.req.query("table");
++	const offset = c.req.query("offset");
++
++	const isInitialSync = !offset || offset === "-1";
++
++	// If this is a subsequent poll, wait a short duration before querying
++	// the database again. 1000ms + jitter makes the UI feel responsive while
++	// preventing a thundering herd of 23 concurrent queries against the local Neon proxy.
++	if (!isInitialSync) {
++		const jitter = Math.floor(Math.random() * 500);
++		await new Promise((r) => setTimeout(r, 1000 + jitter));
++	}
++
++	// Simple Mutex to prevent 23 concurrent DB connections
++	class Mutex {
++		private locked = false;
++		private queue: (() => void)[] = [];
++		async acquire() {
++			if (!this.locked) {
++				this.locked = true;
++				return;
++			}
++			return new Promise<void>(resolve => this.queue.push(resolve));
++		}
++		release() {
++			if (this.queue.length > 0) {
++				const resolve = this.queue.shift();
++				resolve && resolve();
++			} else {
++				this.locked = false;
++			}
++		}
++	}
++	
++	// Create it on the global electricRouter object or globally
++	if (!(global as any).dbMutex) {
++		(global as any).dbMutex = new Mutex();
++	}
++	const dbMutex = (global as any).dbMutex;
++
++	// Initial sync: return all rows for the table
++	const toSnakeCase = (obj: any) => {
++		const result: any = {};
++		for (const [key, value] of Object.entries(obj)) {
++			const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
++			if (value instanceof Date) {
++				// ElectricSQL usually expects Postgres timestamps as ISO strings
++				result[snakeKey] = value.toISOString();
++			} else {
++				result[snakeKey] = value;
++			}
++		}
++		return result;
++	};
++
++	const tableMap: Record<string, any> = {
++		v2_workspaces: schemas.v2Workspaces,
++		v2_projects: schemas.v2Projects,
++		"auth.organizations": schemas.organizations,
++		v2_hosts: schemas.v2Hosts,
++		v2_clients: schemas.v2Clients,
++		v2_users_hosts: schemas.v2UsersHosts,
++		tasks: schemas.tasks,
++		task_statuses: schemas.taskStatuses,
++		workspaces: schemas.workspaces,
++		"auth.members": schemas.members,
++		"auth.users": schemas.users,
++		"auth.invitations": schemas.invitations,
++		"auth.teams": schemas.teams,
++		"auth.team_members": schemas.teamMembers,
++		agent_commands: schemas.agentCommands,
++		integration_connections: schemas.integrationConnections,
++		subscriptions: schemas.subscriptions,
++		"auth.apikeys": schemas.apikeys,
++		chat_sessions: schemas.chatSessions,
++		github_repositories: schemas.githubRepositories,
++		github_pull_requests: schemas.githubPullRequests,
++		automations: schemas.automations,
++		automation_runs: schemas.automationRuns,
++	};
++
++	const messages = [];
++	const schemaTable = tableMap[table as string];
++
++	// Artificial delays to prevent local SQLite foreign key constraint races
++	// ONLY on initial sync.
++	if (isInitialSync) {
++		const level1 = [
++			"v2_projects", "v2_hosts", "projects", "tasks", "task_statuses",
++			"auth.members", "auth.invitations", "auth.teams", "auth.team_members"
++		];
++		const level2 = ["v2_workspaces", "v2_users_hosts", "v2_clients", "workspaces"];
++		
++		if (level2.includes(table as string)) {
++			await new Promise(r => setTimeout(r, 2000));
++		} else if (level1.includes(table as string)) {
++			await new Promise(r => setTimeout(r, 1000));
++		}
++	}
++
++	if (schemaTable) {
++		try {
++			await dbMutex.acquire();
++			let all;
++			try {
++				all = await db.select().from(schemaTable);
++			} finally {
++				dbMutex.release();
++			}
++			
++			if (IS_VERBOSE) {
++				console.log(`Mock ElectricSQL streaming ${all.length} ${table}...`);
++			}
++			
++			// Ensure previousState array exists for this table
++			if (!previousState[table as string]) {
++				previousState[table as string] = [];
++			}
++			const prev = previousState[table as string];
++			const currentIds = new Set();
++			
++			// To ensure the client processes updates/deletes during long polling,
++			// we must use a monotonically increasing LSN per message.
++			let messageLsn = Date.now();
++			
++			// Find rows that were deleted FIRST (so they process before inserts)
++			for (const row of prev) {
++				const primaryKeyId = row.id ?? row.machineId ?? row.userId ?? "1";
++				// Check if the old row's primary key is in the current database
++				const stillExists = all.some((r: any) => (r.id ?? r.machineId ?? r.userId ?? "1") === primaryKeyId);
++				if (!stillExists) {
++					messageLsn++;
++					messages.push({
++						headers: { operation: "delete", txid: messageLsn.toString(), lsn: messageLsn.toString(), relation: ["public", table as string] },
++						key: `"${primaryKeyId}"`,
++						value: toSnakeCase(row),
++					});
++				}
++			}
++			
++			// Process phantom deletes requested by TRPC mutations
++			const phantomsToProcess = pendingPhantomDeletes.filter(p => p.table === table);
++			for (const phantom of phantomsToProcess) {
++				messageLsn++;
++				messages.push({
++					headers: { operation: "delete", txid: messageLsn.toString(), lsn: messageLsn.toString(), relation: ["public", table as string] },
++					key: `"${phantom.id}"`,
++					value: { id: phantom.id }, // Provide minimal value object
++				});
++				// Remove from queue
++				const idx = pendingPhantomDeletes.findIndex(p => p === phantom);
++				if (idx > -1) pendingPhantomDeletes.splice(idx, 1);
++			}
++
++			// Now send inserts for all current rows
++			for (const row of all) {
++				const primaryKeyId = row.id ?? row.machineId ?? row.userId ?? "1";
++				currentIds.add(String(primaryKeyId));
++				
++				const mapped = toSnakeCase(row);
++				if (IS_VERBOSE && table === "v2_workspaces") {
++					console.log(`Workspace shape row:`, mapped);
++				}
++				
++				// Only send inserts on initial sync to avoid spamming the client,
++				// OR if the row wasn't in the previous state (it's new)
++				const isNew = !prev.some((r: any) => (r.id ?? r.machineId ?? r.userId ?? "1") === primaryKeyId);
++				
++				if (isInitialSync || isNew) {
++					messageLsn++;
++					messages.push({
++						headers: { operation: "insert", txid: messageLsn.toString(), lsn: messageLsn.toString(), relation: ["public", table as string] },
++						key: `"${primaryKeyId}"`,
++						value: mapped,
++					});
++				}
++			}
++			
++			// Update previous state
++			previousState[table as string] = all;
++			
++			// Update the final LSN so the up-to-date message matches the last processed
++			messages.push({
++				headers: { control: "up-to-date", global_last_seen_lsn: messageLsn },
++			});
++
++			c.header("electric-handle", `mock-handle-${table}`);
++			c.header("electric-schema", "{}");
++			c.header("electric-cursor", messageLsn.toString());
++			c.header("electric-offset", `${messageLsn}_0`);
++			return c.json(messages);
++		} catch (err: any) {
++			console.error(`[Mock ElectricSQL] Database error streaming ${table}: ${err.message}`);
++			// Return a 500 error so the client knows it failed and will retry
++			return c.json({ error: "Database query failed" }, 500);
++		}
++	}
++	
++	// Fallback for tables not mapped
++	return c.json([]);
++});
+diff --git a/packages/cli-wrapper/src/api/github.ts b/packages/cli-wrapper/src/api/github.ts
+new file mode 100644
+index 000000000..db1682411
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/github.ts
+@@ -0,0 +1,112 @@
++import { db } from "@superset/db/client";
++import { githubInstallations } from "@superset/db/schema";
++import { Hono } from "hono";
++import { v4 as uuidv4 } from "uuid";
++import { generateSignedState, verifySignedState } from "./jwt";
++import { getInstallation } from "./octokit";
++
++export const githubRouter = new Hono();
++
++// GET /api/github/install
++githubRouter.get("/install", async (c) => {
++	// Accept both casings: the upstream web app sends `organizationId`, while the
++	// local web shim and CLI use `organization_id`.
++	const organizationId =
++		c.req.query("organizationId") ?? c.req.query("organization_id");
++	const userId = c.req.query("userId") ?? c.req.query("user_id") ?? uuidv4();
++
++	if (!organizationId) {
++		return c.redirect(
++			"superset://settings/integrations?error=invalid_org_id",
++		);
++	}
++
++	try {
++		const state = generateSignedState(organizationId, userId);
++		const githubAppName = process.env.GITHUB_APP_NAME || "superset-sh-dev";
++
++		const redirectUrl = `https://github.com/apps/${githubAppName}/installations/new?state=${state}`;
++		return c.redirect(redirectUrl);
++	} catch (e) {
++		return c.redirect(
++			"superset://settings/integrations?error=state_generation_failed",
++		);
++	}
++});
++
++// GET /api/github/callback
++githubRouter.get("/callback", async (c) => {
++	const state = c.req.query("state");
++	const installationId = c.req.query("installation_id");
++	const setupAction = c.req.query("setup_action");
++
++	if (setupAction === "cancel") {
++		return c.redirect(
++			"superset://settings/integrations?error=installation_cancelled",
++		);
++	}
++
++	if (!installationId || !state) {
++		return c.redirect(
++			"superset://settings/integrations?error=missing_installation_id",
++		);
++	}
++
++	let stateData;
++	try {
++		stateData = verifySignedState(state);
++	} catch (e) {
++		console.error("State verification failed:", e);
++		return c.redirect(
++			"superset://settings/integrations?error=invalid_state",
++		);
++	}
++
++	let installation;
++	try {
++		installation = await getInstallation(installationId);
++	} catch (e) {
++		console.error("Failed to fetch installation from GitHub:", e);
++		return c.redirect(
++			"superset://settings/integrations?error=installation_fetch_failed",
++		);
++	}
++
++	const accountLogin = installation.account?.login || "";
++	const accountType = installation.account?.type || "";
++
++	try {
++		await db
++			.insert(githubInstallations)
++			.values({
++				organizationId: stateData.organizationId,
++				connectedByUserId: stateData.userId,
++				installationId: installation.id.toString(),
++				accountLogin,
++				accountType,
++				permissions: installation.permissions,
++				suspended: false,
++				createdAt: new Date(),
++				updatedAt: new Date(),
++			})
++			.onConflictDoUpdate({
++				target: [githubInstallations.organizationId],
++				set: {
++					installationId: installation.id.toString(),
++					accountLogin,
++					permissions: installation.permissions,
++					updatedAt: new Date(),
++				},
++			});
++	} catch (e) {
++		console.error("Failed to save installation to database:", e);
++		return c.redirect(
++			"superset://settings/integrations?error=db_insert_failed",
++		);
++	}
++
++	console.log(
++		`Successfully saved GitHub installation ${installation.id} to DB!`,
++	);
++	return c.redirect("superset://settings/integrations?success=true");
++});
+diff --git a/packages/cli-wrapper/src/api/jwt.test.ts b/packages/cli-wrapper/src/api/jwt.test.ts
+new file mode 100644
+index 000000000..cc0b056d6
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/jwt.test.ts
+@@ -0,0 +1,21 @@
++import { describe, expect, it } from "bun:test";
++import { generateSignedState, verifySignedState } from "./jwt";
++
++describe("JWT Auth State Helpers", () => {
++	it("should correctly sign and verify an OAuth state", () => {
++		const orgId = "11111111-1111-1111-1111-111111111111";
++		const userId = "22222222-2222-2222-2222-222222222222";
++
++		const token = generateSignedState(orgId, userId);
++		expect(typeof token).toBe("string");
++		expect(token.length).toBeGreaterThan(0);
++
++		const verified = verifySignedState(token);
++		expect(verified.organizationId).toBe(orgId);
++		expect(verified.userId).toBe(userId);
++	});
++
++	it("should throw an error for invalid tokens", () => {
++		expect(() => verifySignedState("invalid.token.string")).toThrow();
++	});
++});
+diff --git a/packages/cli-wrapper/src/api/jwt.ts b/packages/cli-wrapper/src/api/jwt.ts
+new file mode 100644
+index 000000000..7ce030846
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/jwt.ts
+@@ -0,0 +1,55 @@
++import jwt from "jsonwebtoken";
++
++export interface OAuthState {
++	organizationId: string;
++	userId: string;
++}
++
++function getJwtSecret() {
++	return process.env.JWT_SECRET || "local_electric_dev_secret";
++}
++
++export interface SessionJwtUser {
++	id: string;
++	email: string;
++	organizationIds: string[];
++}
++
++// Mint a session JWT mirroring the better-auth `jwt()` plugin payload
++// ({ sub, email, organizationIds }, 1h, issuer/audience = API URL). The cloud
++// backend signs RS256 against a JWKS; the local companion signs HS256 with the
++// shared dev secret since it exposes no JWKS endpoint and relay verification is
++// bypassed for local installs.
++export function signSessionJwt(user: SessionJwtUser): string {
++	const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
++	return jwt.sign(
++		{
++			sub: user.id,
++			email: user.email,
++			organizationIds: user.organizationIds,
++		},
++		getJwtSecret(),
++		{ expiresIn: "1h", issuer: apiUrl, audience: apiUrl },
++	);
++}
++
++export function generateSignedState(
++	organizationId: string,
++	userId: string,
++): string {
++	const claims = {
++		organizationId,
++		userId,
++	};
++
++	// Expires in 15 minutes
++	return jwt.sign(claims, getJwtSecret(), { expiresIn: "15m" });
++}
++
++export function verifySignedState(token: string): OAuthState {
++	const decoded = jwt.verify(token, getJwtSecret()) as any;
++	return {
++		organizationId: decoded.organizationId,
++		userId: decoded.userId,
++	};
++}
+diff --git a/packages/cli-wrapper/src/api/octokit.ts b/packages/cli-wrapper/src/api/octokit.ts
+new file mode 100644
+index 000000000..1289e9810
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/octokit.ts
+@@ -0,0 +1,48 @@
++import jwt from "jsonwebtoken";
++
++export interface GitHubAccount {
++	login?: string;
++	name?: string;
++	type?: string;
++}
++
++export interface GitHubInstallation {
++	id: number;
++	account?: GitHubAccount;
++	permissions?: any;
++}
++
++export async function getInstallation(installationId: string): Promise<GitHubInstallation> {
++	const appId = process.env.GITHUB_APP_ID || "123456";
++	const privateKey = process.env.GITHUB_APP_PRIVATE_KEY || "dummy_key";
++
++	const now = Math.floor(Date.now() / 1000);
++	const iat = now - 60;
++	const exp = now + 10 * 60;
++
++	const token = jwt.sign(
++		{
++			iss: appId,
++			iat,
++			exp,
++		},
++		privateKey,
++		{ algorithm: "RS256" }
++	);
++
++	const url = `https://api.github.com/app/installations/${installationId}`;
++	
++	const res = await fetch(url, {
++		headers: {
++			Authorization: `Bearer ${token}`,
++			Accept: "application/vnd.github.v3+json",
++			"User-Agent": "superset-dev",
++		},
++	});
++
++	if (!res.ok) {
++		throw new Error(`Failed to fetch installation from GitHub: ${res.status}`);
++	}
++
++	return await res.json() as GitHubInstallation;
++}
+diff --git a/packages/cli-wrapper/src/api/server.test.ts b/packages/cli-wrapper/src/api/server.test.ts
+new file mode 100644
+index 000000000..dded117ac
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/server.test.ts
+@@ -0,0 +1,113 @@
++import { describe, expect, it, mock } from "bun:test";
++
++// Mock the DB client before importing the app
++mock.module("@superset/db/client", () => ({
++	db: {
++		query: {
++			users: {
++				findFirst: mock(async () => null),
++			},
++			sessions: {
++				findFirst: mock(async () => null),
++			},
++			organizations: {
++				findFirst: mock(async () => null),
++			},
++			githubInstallations: {
++				findFirst: mock(async () => null),
++			},
++		},
++		insert: mock(() => ({
++			values: mock(() => ({
++				returning: mock(async () => [{ id: "mock-id", token: "mock-token" }]),
++				onConflictDoNothing: mock(async () => {}),
++				onConflictDoUpdate: mock(async () => {}),
++			})),
++		})),
++		update: mock(() => ({
++			set: mock(() => ({
++				where: mock(() => ({
++					returning: mock(async () => [{ id: "mock-id" }]),
++				})),
++			})),
++		})),
++	},
++}));
++
++import { app } from "./server";
++
++describe("TS API Backend", () => {
++	it("GET /api/health should return OK", async () => {
++		const res = await app.request("/api/health");
++		expect(res.status).toBe(200);
++		expect(await res.text()).toBe("OK");
++	});
++
++	it("POST /api/auth/sign-in/email should return 400 for invalid user", async () => {
++		const res = await app.request("/api/auth/sign-in/email", {
++			method: "POST",
++			headers: { "Content-Type": "application/json" },
++			body: JSON.stringify({ email: "test@example.com" }),
++		});
++		expect(res.status).toBe(400);
++		const json = await res.json();
++		expect(json).toHaveProperty("error", "INVALID_EMAIL_OR_PASSWORD");
++	});
++
++	it("POST /api/auth/sign-up/email should create a user successfully", async () => {
++		const res = await app.request("/api/auth/sign-up/email", {
++			method: "POST",
++			headers: { "Content-Type": "application/json" },
++			body: JSON.stringify({ email: "new@example.com" }),
++		});
++		expect(res.status).toBe(200);
++		const json = (await res.json()) as any;
++		expect(json).toHaveProperty("token");
++		expect(json.user.id).toBe("mock-id");
++	});
++
++	it("GET /api/auth/token should require auth (not 404)", async () => {
++		const res = await app.request("/api/auth/token");
++		expect(res.status).toBe(401);
++	});
++
++	it("GET /api/auth/organization/get-full-organization should require auth (not 404)", async () => {
++		const res = await app.request(
++			"/api/auth/organization/get-full-organization",
++		);
++		expect(res.status).toBe(401);
++	});
++
++	it("GET /integrations/github web shim should redirect (not 404)", async () => {
++		const res = await app.request("/integrations/github");
++		expect(res.status).toBe(302);
++		// No org resolvable in the mock → falls back to the desktop deep link.
++		expect(res.headers.get("location")).toContain(
++			"superset://app/settings/integrations",
++		);
++	});
++
++	it("GET /api/github/install should redirect with state", async () => {
++		const res = await app.request(
++			"/api/github/install?organization_id=11111111-1111-1111-1111-111111111111",
++		);
++		expect(res.status).toBe(302);
++		expect(res.headers.get("location")).toContain("state=");
++	});
++
++	it("PUT /api/chat/:sessionId should create session", async () => {
++		const res = await app.request("/api/chat/my-session-id", {
++			method: "PUT",
++			headers: { "Content-Type": "application/json" },
++			body: JSON.stringify({ organization_id: "org", workspace_id: "ws" }),
++		});
++		expect(res.status).toBe(200);
++	});
++
++	it("GET /api/trpc/chat.getModels should return static models", async () => {
++		const res = await app.request("/api/trpc/chat.getModels");
++		expect(res.status).toBe(200);
++		const json = (await res.json()) as any;
++		expect(json.result.data.models.length).toBeGreaterThan(0);
++	});
++});
+diff --git a/packages/cli-wrapper/src/api/server.ts b/packages/cli-wrapper/src/api/server.ts
+new file mode 100644
+index 000000000..74617795b
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/server.ts
+@@ -0,0 +1,156 @@
++import { serve } from "@hono/node-server";
++import { db } from "@superset/db/client";
++import { sql } from "drizzle-orm";
++import { Hono } from "hono";
++import { cors } from "hono/cors";
++import { logger } from "hono/logger";
++import { authRouter } from "./auth";
++import { chatRouter } from "./chat";
++import { githubRouter } from "./github";
++import { trpcRouter } from "./trpc";
++import { startVersionCheckPoller, versionRouter } from "./version";
++import { webRouter } from "./web";
++
++export interface ServerConfig {
++	apiPort: number;
++	webPort: number;
++	dbUrl: string;
++	verbose?: boolean;
++}
++
++export let IS_VERBOSE = false;
++
++// Hostname that routes the Neon serverless driver at the local neon-http proxy
++// (see packages/db/src/local-proxy.ts).
++const LOCAL_PROXY_HOST = "db.localtest.me";
++
++// Human-readable description of the database target from its connection URL.
++function describeDatabase(dbUrl: string): string {
++	try {
++		const url = new URL(dbUrl);
++		const where = `${url.hostname}:${url.port || "5432"}`;
++		return url.hostname === LOCAL_PROXY_HOST
++			? `PostgreSQL via local Neon HTTP proxy (${where})`
++			: `Neon serverless Postgres (${where})`;
++	} catch {
++		return "database (unparseable connection URL)";
++	}
++}
++
++export const app = new Hono();
++
++// Request logging via Hono's built-in logger, controlled by the `LOG_LEVEL` env var.
++// Set LOG_LEVEL=silent (or off/none) to disable request logs; any other value enables them.
++const logLevel = (process.env.LOG_LEVEL ?? "info").toLowerCase();
++if (!["silent", "off", "none"].includes(logLevel)) {
++	app.use(
++		"*",
++		logger((str, ...rest) => {
++			if (!IS_VERBOSE && str.includes("/v1/shape")) return;
++			console.log(str, ...rest);
++		}),
++	);
++}
++app.use(
++	"*",
++	cors({
++		exposeHeaders: ["set-auth-jwt", "electric-handle", "electric-cursor", "electric-offset", "electric-schema", "electric-up-to-date"],
++	}),
++);
++
++// Global error handler — prevents the process from crashing when the local
++// Neon HTTP proxy is temporarily unavailable (e.g. after sleep/wake).
++app.onError((err, c) => {
++	const message = err instanceof Error ? err.message : String(err);
++	const isDbError =
++		message.includes("Unable to connect") ||
++		message.includes("ConnectionRefused") ||
++		message.includes("Error connecting to database") ||
++		(err as any)?.code === "ConnectionRefused";
++
++	if (isDbError) {
++		console.error(`[server] Database connection error on ${c.req.method} ${c.req.path}: ${message}`);
++		return c.json({ error: "Database temporarily unavailable" }, 503);
++	}
++
++	// Re-throw non-DB errors so they surface normally
++	console.error(`[server] Unhandled error on ${c.req.method} ${c.req.path}:`, err);
++	return c.json({ error: "Internal server error" }, 500);
++});
++
++app.get("/", (c) => c.text("Superset TS Backend is running!"));
++app.get("/api/health", (c) => c.text("OK"));
++
++import { electricRouter } from "./electric";
++
++app.route("/api/auth", authRouter);
++app.route("/api/github", githubRouter);
++app.route("/api/chat", chatRouter);
++app.route("/api/trpc", trpcRouter);
++app.route("/api/version", versionRouter);
++app.route("/v1", electricRouter);
++// Web/integrations shim — stands in for upstream apps/web, which is not bundled
++// in the Linux installer. Served on the web port alongside the API.
++app.route("/integrations", webRouter);
++
++export async function startServer(config: ServerConfig): Promise<void> {
++	if (config.verbose) {
++		IS_VERBOSE = true;
++	}
++
++	// Bind the same app to both upstream-convention ports in one process:
++	// apps/api (default 3001) for the API, apps/web (default 3000) for the
++	// browser-launched integrations shim. Both ports serve the full app, so the
++	// shim's relative redirect into /api/github/install stays on whatever port
++	// the browser used.
++	serve({ fetch: app.fetch, port: config.apiPort, hostname: "::" }, (info) => {
++		console.log(`Listening on http://localhost:${info.port} (api)`);
++	});
++
++	if (config.webPort !== config.apiPort) {
++		try {
++			serve({ fetch: app.fetch, port: config.webPort, hostname: "::" }, (info) => {
++				console.log(`Listening on http://localhost:${info.port} (web)`);
++			});
++		} catch (error) {
++			const message = error instanceof Error ? error.message : String(error);
++			console.error(
++				`Web shim: failed to bind port ${config.webPort} — ${message}`,
++			);
++		}
++	}
++
++	// Also bind to the default ElectricSQL port (8787) so the UI's baked-in 
++	// NEXT_PUBLIC_ELECTRIC_URL hits our mock /v1/shape endpoint without needing rebuild overrides.
++	try {
++		serve({ fetch: app.fetch, port: 8787, hostname: "::" }, (info) => {
++			console.log(`Listening on http://localhost:${info.port} (mock ElectricSQL)`);
++		});
++	} catch (error) {
++		console.warn(`Mock ElectricSQL: failed to bind port 8787 — ${error}`);
++	}
++
++	// Verify database connectivity at startup and report the target so operators
++	// know whether the server reached PostgreSQL / the local Neon proxy.
++	const target = describeDatabase(config.dbUrl);
++	try {
++		await db.execute(sql`select 1`);
++		console.log(`Database: connected to ${target}`);
++	} catch (error) {
++		const message = error instanceof Error ? error.message : String(error);
++		console.error(`Database: connection failed to ${target} — ${message}`);
++	}
++
++	// Verify GitHub App credentials at startup
++	const ghAppId = process.env.GH_APP_ID || process.env.GITHUB_APP_ID;
++	const ghPrivateKey = process.env.GH_APP_PRIVATE_KEY || process.env.GITHUB_APP_PRIVATE_KEY;
++	if (ghAppId && ghPrivateKey) {
++		console.log(`GitHub App: Loaded credentials for App ID ${ghAppId}`);
++	} else {
++		console.warn(`GitHub App: Warning — Missing GH_APP_ID or GH_APP_PRIVATE_KEY. The GitHub integration will not work properly.`);
++	}
++
++	// Check for new upstream releases (non-blocking, sets up 4-hour poll)
++	const currentVersion = process.env.SUPERSET_VERSION ?? "1.12.5";
++	startVersionCheckPoller(currentVersion);
++}
+diff --git a/packages/cli-wrapper/src/api/trpc.test.ts b/packages/cli-wrapper/src/api/trpc.test.ts
+new file mode 100644
+index 000000000..481124338
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/trpc.test.ts
+@@ -0,0 +1,67 @@
++import { expect, test, describe, mock } from "bun:test";
++import { trpcRouter } from "./trpc";
++
++describe("TRPC Mock Backend", () => {
++	const orgId = "8d6b5d7b-0075-4545-9b8f-53a55c2401f9";
++	const projectId = "9584e52c-9f0f-4544-acde-4d8933a26138";
++	const hostId = "fbc993198c459a5c98aa88d07f4d5094";
++
++	async function runBatchRequest(paths: string, batchBody: any) {
++		const req = new Request(`http://localhost/api/trpc/${paths}?batch=1`, {
++			method: "POST",
++			headers: { "Content-Type": "application/json" },
++			body: JSON.stringify(batchBody)
++		});
++		const res = await trpcRouter.fetch(req);
++		return res;
++	}
++
++	test("should return 200 and handle host.ensure successfully", async () => {
++		const res = await runBatchRequest("host.ensure", {
++			"0": {
++				json: { organizationId: orgId, machineId: hostId, name: "test-host" }
++			}
++		});
++		expect(res.status).toBe(200);
++		const json: any = await res.json();
++		expect(json[0].result.data.json.machineId).toBe(hostId);
++	});
++
++	test("should return 200 and handle v2Workspace.create with type=main existing successfully without crash", async () => {
++		const res = await runBatchRequest("v2Workspace.create", {
++			"0": {
++				json: {
++					organizationId: orgId,
++					projectId,
++					hostId,
++					name: "master",
++					branch: "master",
++					type: "main"
++				}
++			}
++		});
++		expect(res.status).toBe(200);
++		const json: any = await res.json();
++		expect(json[0].result).toBeDefined();
++		expect(json[0].error).toBeUndefined();
++	});
++
++	test("should return 200 and handle v2Workspace.create with random id without crash", async () => {
++		const res = await runBatchRequest("v2Workspace.create", {
++			"0": {
++				json: {
++					organizationId: orgId,
++					projectId,
++					hostId,
++					name: "test-new",
++					branch: "test-new",
++					type: "worktree"
++				}
++			}
++		});
++		expect(res.status).toBe(200);
++		const json: any = await res.json();
++		expect(json[0].result).toBeDefined();
++		expect(json[0].error).toBeUndefined();
++	});
++});
+diff --git a/packages/cli-wrapper/src/api/trpc.ts b/packages/cli-wrapper/src/api/trpc.ts
+new file mode 100644
+index 000000000..2b3f5d57c
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/trpc.ts
+@@ -0,0 +1,492 @@
++import { Hono } from "hono";
++import { db } from "@superset/db/client";
++import { sessions, users } from "@superset/db/schema/auth";
++import { githubInstallations, v2Projects, v2Hosts, v2Workspaces } from "@superset/db/schema";
++import { eq, and } from "drizzle-orm";
++
++export const trpcRouter = new Hono();
++
++// GET and POST /api/trpc/*
++trpcRouter.all("/*", async (c) => {
++	const path = c.req.path.replace("/api/trpc/", "");
++	const isBatch = c.req.query("batch") === "1";
++	const paths = path.split(",");
++	
++	let payload: any = null;
++	if (c.req.method === "POST") {
++		try {
++			payload = await c.req.json();
++		} catch (e) {
++			payload = {};
++		}
++	} else if (c.req.method === "GET") {
++		const inputStr = c.req.query("input");
++		if (inputStr) {
++			try {
++				payload = JSON.parse(inputStr);
++			} catch (e) {
++				payload = {};
++			}
++		}
++	}
++
++	const authHeader = c.req.header("authorization");
++	const token = authHeader?.replace("Bearer ", "");
++
++	let currentUser = null;
++	let currentSession = null;
++
++	if (token) {
++		const session = await db.query.sessions.findFirst({
++			where: eq(sessions.token, token),
++		});
++
++		if (session) {
++			currentSession = session;
++			const user = await db.query.users.findFirst({
++				where: eq(users.id, session.userId),
++			});
++
++			if (user) {
++				currentUser = user;
++			}
++		} else if (token.split(".").length === 3) {
++			// Parse JWT
++			try {
++				const jwt = await import("jsonwebtoken");
++				const decoded = jwt.decode(token) as any;
++				if (decoded && decoded.sub) {
++					const user = await db.query.users.findFirst({
++						where: eq(users.id, decoded.sub)
++					});
++					if (user) {
++						currentUser = user;
++						currentSession = {
++							userId: user.id,
++							activeOrganizationId: decoded.organizationIds?.[0] || user.organizationIds?.[0] || null
++						} as any;
++					}
++				}
++			} catch (e) {}
++		}
++	}
++
++	const results = [];
++
++	for (let i = 0; i < paths.length; i++) {
++		const p = paths[i];
++		const rawInput = payload ? (isBatch ? payload[i.toString()] : payload) : null;
++		const inputData = rawInput?.json !== undefined ? rawInput.json : rawInput;
++
++		let res: any = { result: { data: null } };
++
++		function superjsonSerialize(obj: any) {
++			const values: any = {};
++			function traverse(o: any, path: string) {
++				if (!o || typeof o !== "object") return;
++				if (o instanceof Date) return; // handled by parent
++				for (const [k, v] of Object.entries(o)) {
++					const p = path ? `${path}.${k}` : k;
++					if (v instanceof Date) {
++						values[p] = ["Date"];
++					} else if (typeof v === "object") {
++						traverse(v, p);
++					}
++				}
++			}
++			traverse(obj, "");
++			return {
++				json: obj,
++				...(Object.keys(values).length > 0 ? { meta: { values } } : {})
++			};
++		}
++
++		if (p === "user.me") {
++			res = { result: { data: superjsonSerialize(currentUser) } };
++		} else if (p === "organization.list") {
++			res = { result: { data: superjsonSerialize([]) } };
++		} else if (p === "chat.getModels") {
++			res = {
++				result: {
++					data: superjsonSerialize({
++						models: [
++							{ id: "anthropic/claude-opus-4-8", name: "Opus 4.8", provider: "Anthropic" },
++							{ id: "anthropic/claude-opus-4-7", name: "Opus 4.7", provider: "Anthropic" },
++							{ id: "anthropic/claude-fable-5", name: "Fable 5", provider: "Anthropic" },
++							{ id: "anthropic/claude-sonnet-4-6", name: "Sonnet 4.6", provider: "Anthropic" },
++							{ id: "anthropic/claude-haiku-4-5", name: "Haiku 4.5", provider: "Anthropic" },
++							{ id: "openai/gpt-5.5", name: "GPT-5.5", provider: "OpenAI" },
++							{ id: "openai/gpt-5.4", name: "GPT-5.4", provider: "OpenAI" },
++							{ id: "openai/gpt-5.3-codex", name: "GPT-5.3 Codex", provider: "OpenAI" },
++						],
++					})
++				},
++			};
++		} else if (p === "integration.github.getInstallation") {
++			let installationData = null;
++			let inputStr = c.req.query("input");
++			if (inputStr) {
++				try {
++					const parsed = JSON.parse(inputStr);
++					const orgId = parsed?.[0]?.json?.organizationId || parsed?.json?.organizationId;
++					
++					if (orgId) {
++						const installation = await db.query.githubInstallations.findFirst({
++							where: eq(githubInstallations.organizationId, orgId),
++						});
++						
++						if (installation) {
++							installationData = {
++								id: installation.id,
++								accountLogin: installation.accountLogin,
++								accountType: installation.accountType,
++								suspended: installation.suspended,
++								lastSyncedAt: installation.lastSyncedAt,
++								createdAt: installation.createdAt,
++							};
++						}
++					}
++				} catch (e) {}
++			}
++			res = { result: { data: superjsonSerialize(installationData) } };
++		} else if (p === "device.registerDevice") {
++			if (currentSession?.activeOrganizationId) {
++				const deviceId = inputData?.deviceId || "unknown";
++				res = { result: { data: superjsonSerialize({ device: { deviceId }, timestamp: new Date() }) } };
++			} else {
++				res = { error: { message: "No active organization", code: -32603, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500 } } };
++			}
++		} else if (p === "user.completeOnboarding") {
++			if (currentSession) {
++				const [updatedUser] = await db.update(users)
++					.set({ onboardedAt: new Date() })
++					.where(eq(users.id, currentSession.userId))
++					.returning();
++				
++				if (updatedUser) {
++					res = { result: { data: superjsonSerialize(updatedUser) } };
++				} else {
++					res = { error: { message: "Failed to update user", code: -32603, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500 } } };
++				}
++			} else {
++				res = { error: { message: "Unauthorized", code: -32603, data: { code: "UNAUTHORIZED", httpStatus: 401 } } };
++			}
++		} else if (p === "v2Project.findByGitHubRemote") {
++			const orgId = inputData?.organizationId;
++			const repoCloneUrl = inputData?.repoCloneUrl;
++			if (orgId && repoCloneUrl) {
++				const candidates = await db.query.v2Projects.findMany({
++					where: and(
++						eq(v2Projects.organizationId, orgId),
++						eq(v2Projects.repoCloneUrl, repoCloneUrl)
++					),
++				});
++				res = { result: { data: superjsonSerialize({ candidates }) } };
++			} else {
++				res = { result: { data: superjsonSerialize({ candidates: [] }) } };
++			}
++		} else if (p === "v2Project.get") {
++			const orgId = inputData?.organizationId;
++			const id = inputData?.id;
++			if (orgId && id) {
++				const project = await db.query.v2Projects.findFirst({
++					where: and(
++						eq(v2Projects.organizationId, orgId),
++						eq(v2Projects.id, id)
++					),
++				});
++				if (project) {
++					res = { result: { data: superjsonSerialize(project) } };
++				} else {
++					res = { error: { message: "NOT_FOUND", code: -32603, data: { code: "NOT_FOUND", httpStatus: 404 } } };
++				}
++			} else {
++				res = { error: { message: "Missing input", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Project.linkRepoCloneUrl") {
++			if (inputData?.id) {
++				await db.update(v2Projects)
++					.set({ repoCloneUrl: inputData.repoCloneUrl })
++					.where(eq(v2Projects.id, inputData.id));
++				res = { result: { data: superjsonSerialize({ success: true }) } };
++			} else {
++				res = { error: { message: "Missing id", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Project.create") {
++			try {
++				const [newProj] = await db.insert(v2Projects).values({
++					id: inputData?.id,
++					organizationId: inputData?.organizationId,
++					name: inputData?.name,
++					slug: inputData?.slug,
++					repoCloneUrl: inputData?.repoCloneUrl,
++				}).returning();
++				res = { result: { data: superjsonSerialize(newProj) } };
++			} catch (err: any) {
++				// Handle unique constraint violation on slug
++				if (err.message?.includes("v2_projects_org_slug_unique")) {
++					res = { error: { message: "Project slug already exists", code: -32603, data: { code: "CONFLICT", httpStatus: 409 } } };
++				} else {
++					console.error(err); res = { error: { message: err.message, code: -32603, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500 } } };
++				}
++			}
++		} else if (p === "v2Project.delete") {
++			if (inputData?.id) {
++				await db.delete(v2Projects).where(eq(v2Projects.id, inputData.id));
++				res = { result: { data: superjsonSerialize({ success: true }) } };
++			} else {
++				res = { error: { message: "Missing id", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "host.ensure") {
++			const orgId = inputData?.organizationId;
++			const machineId = inputData?.machineId;
++			const name = inputData?.name;
++			if (orgId && machineId && name) {
++				let host = await db.query.v2Hosts.findFirst({
++					where: and(
++						eq(v2Hosts.organizationId, orgId),
++						eq(v2Hosts.machineId, machineId)
++					)
++				});
++				if (!host) {
++					const [newHost] = await db.insert(v2Hosts).values({
++						organizationId: orgId,
++						machineId: machineId,
++						name: name,
++						isOnline: true,
++					}).returning();
++					host = newHost;
++				}
++				
++				if (currentSession?.userId) {
++					// Ensure user is linked to host
++					const { v2UsersHosts } = await import("@superset/db/schema");
++					const existingLink = await db.query.v2UsersHosts.findFirst({
++						where: and(
++							eq(v2UsersHosts.organizationId, orgId),
++							eq(v2UsersHosts.hostId, machineId),
++							eq(v2UsersHosts.userId, currentSession.userId)
++						)
++					});
++					if (!existingLink) {
++						await db.insert(v2UsersHosts).values({
++							organizationId: orgId,
++							hostId: machineId,
++							userId: currentSession.userId,
++							role: "owner"
++						});
++					}
++				}
++				
++				res = { result: { data: superjsonSerialize(host) } };
++			} else {
++				res = { error: { message: "Missing input", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Workspace.getFromHost") {
++			const orgId = inputData?.organizationId;
++			const id = inputData?.id;
++			console.log(`DEBUG getFromHost: orgId=${orgId}, id=${id}`);
++			if (orgId && id) {
++				const { v2Workspaces } = await import("@superset/db/schema");
++				const ws = await db.query.v2Workspaces.findFirst({
++					where: and(
++						eq(v2Workspaces.organizationId, orgId),
++						eq(v2Workspaces.id, id)
++					)
++				});
++				console.log(`DEBUG getFromHost: ws found? ${!!ws}`);
++				if (ws) res = { result: { data: superjsonSerialize(ws) } };
++				else res = { result: { data: superjsonSerialize(null) } };
++			} else {
++				res = { error: { message: "Missing id", code: -32600, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "workspaceCleanup.inspect") {
++			res = { result: { data: superjsonSerialize({ canDestroy: true, reasons: [] }) } };
++		} else if (p === "workspaceCleanup.destroy") {
++			const id = inputData?.workspaceId;
++			if (id) {
++				const { v2Workspaces } = await import("@superset/db/schema");
++				await db.delete(v2Workspaces).where(eq(v2Workspaces.id, id));
++				res = { result: { data: superjsonSerialize({ status: "success" }) } };
++			} else {
++				res = { error: { message: "Missing id", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "git.getStatus") {
++			res = { result: { data: superjsonSerialize({ isClean: true, isDetachedHead: false, changes: [], activeBranch: "main" }) } };
++		} else if (p === "v2Workspace.listFromHost") {
++			const id = inputData?.id;
++			const name = inputData?.name;
++			const branch = inputData?.branch;
++			const hostId = inputData?.hostId;
++			const taskId = inputData?.taskId;
++		} else if (p === "v2Workspace.update") {
++			const id = inputData?.id;
++			const name = inputData?.name;
++			const branch = inputData?.branch;
++			const hostId = inputData?.hostId;
++			const taskId = inputData?.taskId;
++			
++			if (id) {
++				const patch: any = {};
++				if (name !== undefined) patch.name = name;
++				if (branch !== undefined) patch.branch = branch;
++				if (hostId !== undefined) patch.hostId = hostId;
++				if (taskId !== undefined) patch.taskId = taskId;
++				
++				if (Object.keys(patch).length > 0) {
++					const [updated] = await db.update(v2Workspaces)
++						.set(patch)
++						.where(eq(v2Workspaces.id, id))
++						.returning();
++					if (updated) {
++						res = { result: { data: superjsonSerialize(updated) } };
++					} else {
++						res = { error: { message: "NOT_FOUND", code: -32603, data: { code: "NOT_FOUND", httpStatus: 404 } } };
++					}
++				} else {
++					res = { error: { message: "No fields to update", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++				}
++			} else {
++				res = { error: { message: "Missing id", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Workspace.create") {
++			const orgId = inputData?.organizationId;
++			const projectId = inputData?.projectId;
++			const hostId = inputData?.hostId;
++			const name = inputData?.name;
++			const branch = inputData?.branch;
++			const type = inputData?.type;
++			if (orgId && projectId && hostId && name && branch) {
++				try {
++					if (inputData?.id) {
++						const existing = await db.query.v2Workspaces.findFirst({
++							where: and(
++								eq(v2Workspaces.organizationId, orgId),
++								eq(v2Workspaces.id, inputData.id)
++							)
++						});
++						if (existing) {
++							res = { result: { data: superjsonSerialize(existing) } };
++							results.push(res);
++							continue;
++						}
++					}
++
++					// Also check for existing main workspace for this host/project to avoid unique constraint violations
++					if (type === "main") {
++						const existingMain = await db.query.v2Workspaces.findFirst({
++							where: and(
++								eq(v2Workspaces.projectId, projectId),
++								eq(v2Workspaces.hostId, hostId),
++								eq(v2Workspaces.type, "main")
++							)
++						});
++						if (existingMain) {
++							res = { result: { data: superjsonSerialize(existingMain) } };
++							results.push(res);
++							continue;
++						}
++					}
++
++					const [newWs] = await db.insert(v2Workspaces).values({
++						...(inputData?.id ? { id: inputData.id } : {}),
++						organizationId: orgId,
++						projectId: projectId,
++						hostId: hostId,
++						name: name,
++						branch: branch,
++						type: type || "worktree",
++					}).returning();
++					res = { result: { data: superjsonSerialize(newWs) } };
++				} catch (err: any) {
++					console.error(err); res = { error: { message: err.message, code: -32603, data: { code: "INTERNAL_SERVER_ERROR", httpStatus: 500 } } };
++				}
++			} else {
++				res = { error: { message: "Missing input", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Project.list") {
++			const orgId = inputData?.organizationId;
++			if (orgId) {
++				const rows = await db.query.v2Projects.findMany({
++					where: eq(v2Projects.organizationId, orgId),
++				});
++				res = { result: { data: superjsonSerialize(rows) } };
++			} else {
++				res = { error: { message: "Missing input", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Project.update") {
++			const id = inputData?.id;
++			if (id) {
++				const patch: any = {};
++				if (inputData?.name !== undefined) patch.name = inputData.name;
++				if (inputData?.slug !== undefined) patch.slug = inputData.slug;
++				if (inputData?.repoCloneUrl !== undefined) patch.repoCloneUrl = inputData.repoCloneUrl;
++				
++				if (Object.keys(patch).length > 0) {
++					const [updated] = await db.update(v2Projects).set(patch).where(eq(v2Projects.id, id)).returning();
++					if (updated) {
++						res = { result: { data: superjsonSerialize(updated) } };
++					} else {
++						res = { error: { message: "NOT_FOUND", code: -32603, data: { code: "NOT_FOUND", httpStatus: 404 } } };
++					}
++				} else {
++					res = { error: { message: "No fields to update", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++				}
++			} else {
++				res = { error: { message: "Missing input", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Workspace.list") {
++			const orgId = inputData?.organizationId;
++			if (orgId) {
++				const conditions = [eq(v2Workspaces.organizationId, orgId)];
++				if (inputData.projectId) conditions.push(eq(v2Workspaces.projectId, inputData.projectId));
++				if (inputData.hostId) conditions.push(eq(v2Workspaces.hostId, inputData.hostId));
++				const rows = await db.query.v2Workspaces.findMany({
++					where: and(...conditions)
++				});
++				res = { result: { data: superjsonSerialize(rows) } };
++			} else {
++				res = { error: { message: "Missing input", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Workspace.delete" || p === "v2Workspace.deleteMainForHost") {
++			const id = inputData?.id;
++			if (id) {
++				const existing = await db.query.v2Workspaces.findFirst({ where: eq(v2Workspaces.id, id) });
++				if (!existing) {
++					const { pendingPhantomDeletes } = await import("./electric");
++					pendingPhantomDeletes.push({ table: "v2_workspaces", id });
++				}
++				await db.delete(v2Workspaces).where(eq(v2Workspaces.id, id));
++				res = { result: { data: superjsonSerialize({ success: true, alreadyGone: false }) } };
++			} else {
++				res = { error: { message: "Missing id", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else if (p === "v2Host.rename") {
++			const hostId = inputData?.hostId;
++			const name = inputData?.name;
++			if (hostId && name !== undefined) {
++				const [updated] = await db.update(v2Hosts)
++					.set({ name })
++					.where(eq(v2Hosts.machineId, hostId))
++					.returning();
++				if (updated) {
++					res = { result: { data: superjsonSerialize(updated) } };
++				} else {
++					res = { error: { message: "NOT_FOUND", code: -32603, data: { code: "NOT_FOUND", httpStatus: 404 } } };
++				}
++			} else {
++				res = { error: { message: "Missing hostId or name", code: -32603, data: { code: "BAD_REQUEST", httpStatus: 400 } } };
++			}
++		} else {
++			console.warn(`Unimplemented tRPC query/mutation: ${p}`);
++		}
++
++		results.push(res);
++	}
++
++	if (isBatch) {
++		return c.json(results);
++	} else {
++		return c.json(results[0] || {});
++	}
++});
+diff --git a/packages/cli-wrapper/src/api/version.ts b/packages/cli-wrapper/src/api/version.ts
+new file mode 100644
+index 000000000..b72e226a4
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/version.ts
+@@ -0,0 +1,169 @@
++import { Hono } from "hono";
++
++export const versionRouter = new Hono();
++
++// GitHub releases manifest URL for Linux auto-updates.
++const RELEASES_MANIFEST_URL =
++	"https://github.com/superset-sh/superset/releases/latest/download/latest-linux.yml";
++
++// Cache the latest release info so we don't hammer GitHub on every request.
++let cachedRelease: {
++	version: string;
++	releaseDate: string;
++	files: { url: string; sha512: string; size: number }[];
++	fetchedAt: number;
++} | null = null;
++
++const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours, same as the desktop auto-updater interval
++
++/**
++ * Fetch the latest release manifest from GitHub releases.
++ * Parses the electron-builder `latest-linux.yml` format.
++ */
++async function fetchLatestRelease() {
++	if (cachedRelease && Date.now() - cachedRelease.fetchedAt < CACHE_TTL_MS) {
++		return cachedRelease;
++	}
++
++	try {
++		const response = await fetch(RELEASES_MANIFEST_URL, {
++			headers: { "User-Agent": "superset-dev-cli" },
++			redirect: "follow",
++			signal: AbortSignal.timeout(10_000),
++		});
++
++		if (!response.ok) {
++			console.warn(
++				`[version-check] Failed to fetch release manifest: HTTP ${response.status}`,
++			);
++			return cachedRelease; // Return stale cache if available
++		}
++
++		const text = await response.text();
++		
++		// Simple parsing since we don't have a YAML parser available.
++		// electron-builder manifests are very flat and consistent.
++		const versionMatch = text.match(/^version:\s*(.+)$/m);
++		const dateMatch = text.match(/^releaseDate:\s*['"]?([^'"\n]+)['"]?$/m);
++
++		if (!versionMatch) {
++			console.warn("[version-check] Release manifest missing version field");
++			return cachedRelease;
++		}
++
++		cachedRelease = {
++			version: versionMatch[1].trim(),
++			releaseDate: dateMatch ? dateMatch[1].trim() : new Date().toISOString(),
++			files: [], // Files list omitted for simple parser
++			fetchedAt: Date.now(),
++		};
++
++		return cachedRelease;
++	} catch (error) {
++		const msg = error instanceof Error ? error.message : String(error);
++		console.warn(`[version-check] Failed to check for updates: ${msg}`);
++		return cachedRelease; // Return stale cache on network error
++	}
++}
++
++// GET /api/version/check?current=1.12.5
++// Returns the latest available version and whether an update is available.
++versionRouter.get("/check", async (c) => {
++	const currentVersion = c.req.query("current") ?? "0.0.0";
++
++	const latest = await fetchLatestRelease();
++	if (!latest) {
++		return c.json({
++			updateAvailable: false,
++			currentVersion,
++			latestVersion: null,
++			error: "Unable to check for updates",
++		});
++	}
++
++	// Simple semver comparison (major.minor.patch)
++	const updateAvailable = isNewerVersion(currentVersion, latest.version);
++
++	return c.json({
++		updateAvailable,
++		currentVersion,
++		latestVersion: latest.version,
++		releaseDate: latest.releaseDate,
++		downloadUrl: `https://github.com/superset-sh/superset/releases/latest`,
++		files: latest.files,
++	});
++});
++
++// GET /api/version/latest
++// Returns just the latest version info (no comparison needed).
++versionRouter.get("/latest", async (c) => {
++	const latest = await fetchLatestRelease();
++	if (!latest) {
++		return c.json({ error: "Unable to fetch latest version" }, 503);
++	}
++
++	return c.json({
++		version: latest.version,
++		releaseDate: latest.releaseDate,
++		downloadUrl: `https://github.com/superset-sh/superset/releases/latest`,
++		files: latest.files,
++	});
++});
++
++/**
++ * Compare two semver strings. Returns true if `latest` is newer than `current`.
++ */
++function isNewerVersion(current: string, latest: string): boolean {
++	const parseVersion = (v: string) => {
++		const clean = v.replace(/^v/, "");
++		const [main, pre] = clean.split("-");
++		const parts = (main ?? "0.0.0").split(".").map(Number);
++		return { major: parts[0] ?? 0, minor: parts[1] ?? 0, patch: parts[2] ?? 0, pre: pre ?? "" };
++	};
++
++	const c = parseVersion(current);
++	const l = parseVersion(latest);
++
++	if (l.major !== c.major) return l.major > c.major;
++	if (l.minor !== c.minor) return l.minor > c.minor;
++	if (l.patch !== c.patch) return l.patch > c.patch;
++
++	// If latest has no pre-release but current does, latest is newer
++	if (c.pre && !l.pre) return true;
++	return false;
++}
++
++/**
++ * Check for updates at startup and set up a 4-hour polling interval.
++ * This aligns perfectly with the desktop app's auto-updater schedule.
++ */
++export function startVersionCheckPoller(currentVersion: string): void {
++	const UPDATE_CHECK_INTERVAL_MS = 1000 * 60 * 60 * 4; // 4 hours
++
++	const check = async () => {
++		const latest = await fetchLatestRelease();
++		if (!latest) {
++			return; // Silently skip if we can't reach GitHub
++		}
++
++		if (isNewerVersion(currentVersion, latest.version)) {
++			console.log("");
++			console.log(`  ╔══════════════════════════════════════════════════════╗`);
++			console.log(`  ║  🆕 New version available: ${latest.version.padEnd(10)} (current: ${currentVersion.padEnd(8)}) ║`);
++			console.log(`  ║  https://github.com/superset-sh/superset/releases   ║`);
++			console.log(`  ╚══════════════════════════════════════════════════════╝`);
++			console.log("");
++		} else {
++			console.log(`Version: ${currentVersion} (up to date)`);
++		}
++	};
++
++	// Run immediately at startup
++	check().catch(() => {});
++
++	// And then poll every 4 hours to match the desktop app's toast cycle
++	const interval = setInterval(() => {
++		check().catch(() => {});
++	}, UPDATE_CHECK_INTERVAL_MS);
++	interval.unref();
++}
+diff --git a/packages/cli-wrapper/src/api/web.ts b/packages/cli-wrapper/src/api/web.ts
+new file mode 100644
+index 000000000..5ca560c61
+--- /dev/null
++++ b/packages/cli-wrapper/src/api/web.ts
+@@ -0,0 +1,39 @@
++import { db } from "@superset/db/client";
++import { organizations, sessions } from "@superset/db/schema/auth";
++import { desc, isNotNull } from "drizzle-orm";
++import { Hono } from "hono";
++
++export const webRouter = new Hono();
++
++// Resolve the organization for the locally signed-in user. The integrations
++// flow is launched in the system browser, which carries no Superset session, so
++// we cannot read it from a request. Instead resolve server-side from the most
++// recent session that has an active organization (i.e. whoever is signed into
++// the desktop), falling back to the first organization on record.
++async function resolveActiveSessionData(): Promise<{ organizationId: string; userId: string } | null> {
++	const session = await db.query.sessions.findFirst({
++		where: isNotNull(sessions.activeOrganizationId),
++		orderBy: desc(sessions.createdAt),
++	});
++	if (session?.activeOrganizationId && session.userId) {
++		return { organizationId: session.activeOrganizationId, userId: session.userId };
++	}
++
++	return null;
++}
++
++// GET /integrations/github
++// Stand-in for the upstream `apps/web` integrations page, which is not bundled
++// in the Linux installer. The desktop opens this URL in the browser; we resolve
++// the org and silently redirect into the backend GitHub App install flow. The
++// redirect is relative, so it stays on whichever port served this request.
++webRouter.get("/github", async (c) => {
++	const sessionData = await resolveActiveSessionData();
++	if (!sessionData) {
++		return c.redirect(
++			"superset://settings/integrations?error=no_organization",
++		);
++	}
++
++	return c.redirect(`/api/github/install?organization_id=${sessionData.organizationId}&user_id=${sessionData.userId}`);
++});
+-- 
+2.43.0
+

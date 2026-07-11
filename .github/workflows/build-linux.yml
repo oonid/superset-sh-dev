@@ -21,6 +21,13 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Apply Offline Patches
+        working-directory: ./upstream/superset
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git am ../../patches/*.patch
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:

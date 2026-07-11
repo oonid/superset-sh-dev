@@ -1,0 +1,31 @@
+From b06451cc841100557d927e96cf58538d5de9ac21 Mon Sep 17 00:00:00 2001
+From: oon arfiandwi <oon.arfiandwi@gmail.com>
+Date: Sat, 4 Jul 2026 13:01:43 +0700
+Subject: [PATCH 8/8] fix(cli-wrapper): use static import for package.json to
+ prevent runtime ENOENT
+
+---
+ packages/cli-wrapper/cli.config.ts | 6 +-----
+ 1 file changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/packages/cli-wrapper/cli.config.ts b/packages/cli-wrapper/cli.config.ts
+index dff97a269..9e1117bb0 100644
+--- a/packages/cli-wrapper/cli.config.ts
++++ b/packages/cli-wrapper/cli.config.ts
+@@ -1,12 +1,8 @@
+ import { boolean, defineConfig, string } from "@superset/cli-framework";
+-import { readFileSync } from "node:fs";
+-import { resolve } from "node:path";
+ 
+ // Read the version from the desktop app's package.json so the CLI
+ // accurately reports the bundled release version.
+-const desktopPkg = JSON.parse(
+-	readFileSync(resolve(import.meta.dir, "../../apps/desktop/package.json"), "utf-8")
+-);
++import desktopPkg from "../../apps/desktop/package.json" with { type: "json" };
+ const VERSION = desktopPkg.version;
+ 
+ export default defineConfig({
+-- 
+2.43.0
+
