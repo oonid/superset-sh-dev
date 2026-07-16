@@ -1,4 +1,4 @@
-From dac4fdd3f22be606be0eb40a7ac1afb8b14de2ad Mon Sep 17 00:00:00 2001
+From d2551bb1255d401753e34e164209cd40e008824f Mon Sep 17 00:00:00 2001
 From: oon arfiandwi <oon.arfiandwi@gmail.com>
 Date: Fri, 3 Jul 2026 21:39:12 +0700
 Subject: [PATCH 4/8] feat(cli-wrapper): implement mock API server

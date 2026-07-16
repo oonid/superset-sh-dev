@@ -1,4 +1,4 @@
-From 27b7dd0f4c70c707b1ba60cfa58d03102ff20dd2 Mon Sep 17 00:00:00 2001
+From c53db0d3c875a6c955130e62038051a6c0dcafce Mon Sep 17 00:00:00 2001
 From: oon arfiandwi <oon.arfiandwi@gmail.com>
 Date: Fri, 3 Jul 2026 21:39:23 +0700
 Subject: [PATCH 6/8] fix(api): proxy tRPC and cloud requests for local dev

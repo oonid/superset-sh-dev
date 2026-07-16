@@ -1,4 +1,4 @@
-From 4161da2d960869f14fb24b83cf1e3256b7b8a45c Mon Sep 17 00:00:00 2001
+From 5e2836dd949a02e0790ca1767137f286c7083a96 Mon Sep 17 00:00:00 2001
 From: oon arfiandwi <oon.arfiandwi@gmail.com>
 Date: Fri, 3 Jul 2026 21:38:49 +0700
 Subject: [PATCH 1/8] docs: add cli-wrapper architecture and github integration

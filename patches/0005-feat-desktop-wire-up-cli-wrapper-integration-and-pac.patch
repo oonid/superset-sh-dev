@@ -1,4 +1,4 @@
-From 8b4b78b9daf3121a7db064472c933175a60b486a Mon Sep 17 00:00:00 2001
+From 074ac1bf13e5c6712346a30c1e994c512da738dd Mon Sep 17 00:00:00 2001
 From: oon arfiandwi <oon.arfiandwi@gmail.com>
 Date: Fri, 3 Jul 2026 21:39:18 +0700
 Subject: [PATCH 5/8] feat(desktop): wire up cli-wrapper integration and
@@ -29,7 +29,7 @@ index f7712a06b..7692ff7b1 100644
  
  	// Windows
 diff --git a/apps/desktop/package.json b/apps/desktop/package.json
-index 4cf229cad..1326a61d6 100644
+index 9fd522150..b6b57f185 100644
 --- a/apps/desktop/package.json
 +++ b/apps/desktop/package.json
 @@ -1,6 +1,6 @@
@@ -38,7 +38,7 @@ index 4cf229cad..1326a61d6 100644
 -	"productName": "Superset",
 +	"productName": "superset-dev",
  	"description": "The last developer tool you'll ever need",
- 	"version": "1.14.3",
+ 	"version": "1.15.0",
  	"main": "./dist/main/index.js",
 diff --git a/apps/desktop/scripts/build-bundled-cli.ts b/apps/desktop/scripts/build-bundled-cli.ts
 index 7bf8a6d25..bb0509aa9 100644

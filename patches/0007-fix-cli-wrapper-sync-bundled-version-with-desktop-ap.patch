@@ -1,4 +1,4 @@
-From 58f9ea97813123381a312efb3bc64e0a1aaeb1fe Mon Sep 17 00:00:00 2001
+From dc5c0eac45483a4c21c98d2add6db2eba723bb3b Mon Sep 17 00:00:00 2001
 From: oon arfiandwi <oon.arfiandwi@gmail.com>
 Date: Fri, 3 Jul 2026 22:19:38 +0700
 Subject: [PATCH 7/8] fix(cli-wrapper): sync bundled version with desktop app
